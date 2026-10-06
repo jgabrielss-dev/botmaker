@@ -12,10 +12,15 @@ router.post('/login', (req, res) => {
   const token = auth.login((req.body && req.body.password) || '');
   if (!token) {
     const issues = auth.passwordIssues();
+    const expectedLen = auth.expectedPassword().length;
+    const givenLen = String((req.body && req.body.password) || '').length;
     return res.status(401).json({
-      error: issues.length
-        ? 'Senha incorreta — a ADMIN_PASSWORD gravada tem: ' + issues.join(', ') + '. Corrija em Variables e dê Deploy.'
-        : 'Senha incorreta'
+      error: 'Senha incorreta',
+      debug: {
+        digitada: givenLen + ' caracteres',
+        gravada: expectedLen + ' caracteres',
+        avisos: issues
+      }
     });
   }
   res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax`);
@@ -53,7 +58,10 @@ router.get('/health', (req, res) =>
         ? 'BASE_URL parece ser o texto de exemplo, troque pelo dominio real'
         : null,
       process.env.BASE_URL && !/^https:\/\//.test(process.env.BASE_URL) ? 'BASE_URL precisa comecar com https://' : null,
-      process.env.DATA_DIR && process.env.DATA_DIR !== '/data'
+      process.env.DATA_DIR && !process.env.DATA_DIR.startsWith('/')
+        ? `DATA_DIR="${process.env.DATA_DIR}" e relativa: os dados sao apagados a cada deploy (use /data com volume)`
+        : null,
+      process.env.DATA_DIR && process.env.DATA_DIR !== '/data' && process.env.DATA_DIR.startsWith('/')
         ? `DATA_DIR="${process.env.DATA_DIR}" (o volume costuma ser /data, minusculo)`
         : null
     ].filter(Boolean)

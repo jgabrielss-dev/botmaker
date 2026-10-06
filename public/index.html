@@ -194,7 +194,11 @@ async function api(path, opts = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== '/login') { showLogin(); throw new Error('Sessão expirada'); }
-  if (!res.ok) throw new Error(data.error || 'Erro ' + res.status);
+  if (!res.ok) {
+    const e = new Error(data.error || 'Erro ' + res.status);
+    e.data = data;
+    throw e;
+  }
   return data;
 }
 
@@ -217,7 +221,11 @@ $('#loginForm').addEventListener('submit', async (e) => {
   try {
     await api('/login', { body: { password: $('#loginPassword').value } });
     showApp(); loadBots();
-  } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
+  } catch (ex) {
+    const d = ex.data || {};
+    err.textContent = ex.message + (d.debug ? ` (digitou ${d.debug.digitada}; gravada ${d.debug.gravada})` : '');
+    err.classList.remove('hidden');
+  }
 });
 
 $('#btnLogout').addEventListener('click', async () => { await api('/logout', { method: 'POST' }); showLogin(); });
