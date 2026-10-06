@@ -192,8 +192,8 @@ async function api(path, opts = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: opts.body ? JSON.stringify(opts.body) : undefined
   });
-  if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== '/login') { showLogin(); throw new Error('Sessão expirada'); }
   if (!res.ok) throw new Error(data.error || 'Erro ' + res.status);
   return data;
 }

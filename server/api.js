@@ -27,6 +27,7 @@ router.get('/health', (req, res) =>
     ok: true,
     dataDir: process.env.DATA_DIR || '(padrao)',
     baseUrl: process.env.BASE_URL || null,
+    adminPassword: !!process.env.ADMIN_PASSWORD,
     mpToken: (process.env.MERCADO_PAGO_ACCESS_TOKEN || '').startsWith('[cole') ? 'placeholder' : !!process.env.MERCADO_PAGO_ACCESS_TOKEN,
     bots: db.prepare('SELECT COUNT(*) c FROM bots').get().c,
     flows: db.prepare('SELECT COUNT(*) c FROM flows').get().c
