@@ -1,9 +1,36 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { DatabaseSync } = require('node:sqlite');
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-fs.mkdirSync(DATA_DIR, { recursive: true });
+function resolveDataDir() {
+  const candidates = [
+    process.env.DATA_DIR,
+    path.join(__dirname, '..', 'data'),
+    path.join(os.tmpdir(), 'botmaker-data')
+  ].filter(Boolean);
+
+  const persistent = process.env.DATA_DIR && process.env.RAILWAY_ENVIRONMENT;
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const probe = path.join(dir, '.write-test');
+      fs.writeFileSync(probe, 'ok');
+      fs.unlinkSync(probe);
+      if (process.env.DATA_DIR && dir !== process.env.DATA_DIR) {
+        console.warn(`AVISO: DATA_DIR="${process.env.DATA_DIR}" nao esta gravavel. Usando ${dir}`);
+        if (persistent) console.warn('AVISO: sem volume montado, os dados serao APAGADOS a cada deploy.');
+      }
+      return dir;
+    } catch (e) {
+      console.warn(`AVISO: nao foi possivel usar "${dir}" (${e.code || e.message})`);
+    }
+  }
+  throw new Error('Nenhum diretorio gravavel encontrado para o banco de dados');
+}
+
+const DATA_DIR = resolveDataDir();
+console.log('Banco de dados em: ' + DATA_DIR);
 
 const db = new DatabaseSync(path.join(DATA_DIR, 'app.db'));
 db.exec('PRAGMA journal_mode = WAL;');

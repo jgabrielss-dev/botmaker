@@ -75,8 +75,9 @@ antes de publicar.
 
 1. Crie um repositório no GitHub com este projeto e suba os arquivos.
 2. Em [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**.
-3. **Settings → Service → Networking** → copie o domínio gerado (ex.: `xxx.up.railway.app`).
-4. **Settings → Volume**: monte um disco em `/data` (persistência do SQLite).
+3. **Settings → Networking** → copie o domínio gerado (ex.: `xxx.up.railway.app`).
+4. **Volumes** (aba do serviço): **Add Volume → Mount Path = `/data`** e depois
+   **Deploy → Redeploy** (sem isso o `/data` não existe e o `DATA_DIR=/data` não serve).
 5. **Variables** do serviço:
    - `ADMIN_PASSWORD` = sua senha
    - `BASE_URL` = `https://xxx.up.railway.app` (sem barra no final)
@@ -86,6 +87,19 @@ antes de publicar.
 6. **Settings → Build**: nada extra (o `npm install` automático basta).
    O `engines.node >= 22.5` do `package.json` já força o Node compatível com `node:sqlite`.
 7. Deploy automático. Abra `https://xxx.up.railway.app`, faça login com `ADMIN_PASSWORD`.
+
+Se o serviço não subir, veja os logs: a primeira linha diz `Banco de dados em: ...`.
+Sem volume, o app ainda sobe (usa pasta temporária) mas **apaga os dados a cada deploy**.
+
+Teste depois de publicar: `https://SEU-DOMINIO/api/health` — mostra `dataDir`, se o
+`BASE_URL`/token do MP foram lidos e quantos bots/fluxos existem no banco.
+
+### ⚠️ Não use Vercel
+
+O Vercel é **serverless**: só executa funções avulsas (não um servidor Express rodando),
+o sistema de arquivos é **somente leitura** (sem volume) e o SQLite não persistiria.
+Por isso o `/api/login` retorna **404** lá. Use Railway, Render ou qualquer host Node
+com processo contínuo + disco (Railway/Render) ou PostgreSQL.
 
 ## 4. Deploy no Render
 

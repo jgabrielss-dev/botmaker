@@ -1,3 +1,14 @@
+{
+  const [maj, min] = process.versions.node.split('.').map(Number);
+  if (maj < 22 || (maj === 22 && min < 5)) {
+    console.error(
+      `ERRO: Node ${process.versions.node} detectado. Este projeto exige Node >= 22.5 (usa o modulo nativo node:sqlite). ` +
+        `Configure a variavel NODE_VERSION=22.5 ou superior nas variaveis do hospedeiro.`
+    );
+    process.exit(1);
+  }
+}
+
 require('dotenv').config();
 const path = require('path');
 const express = require('express');

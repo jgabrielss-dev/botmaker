@@ -22,6 +22,17 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+router.get('/health', (req, res) =>
+  res.json({
+    ok: true,
+    dataDir: process.env.DATA_DIR || '(padrao)',
+    baseUrl: process.env.BASE_URL || null,
+    mpToken: (process.env.MERCADO_PAGO_ACCESS_TOKEN || '').startsWith('[cole') ? 'placeholder' : !!process.env.MERCADO_PAGO_ACCESS_TOKEN,
+    bots: db.prepare('SELECT COUNT(*) c FROM bots').get().c,
+    flows: db.prepare('SELECT COUNT(*) c FROM flows').get().c
+  })
+);
+
 router.use(auth.requireAuth);
 
 router.get('/me', (req, res) => res.json({ ok: true }));
