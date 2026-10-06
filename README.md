@@ -1,0 +1,136 @@
+# Painel de Bots Telegram — Fluxos Visuais + Pix (Mercado Pago)
+
+Sistema completo para gerenciar **múltiplos bots do Telegram** com construtor de fluxos
+(nós e trilhas), integração **Pix via Mercado Pago**, trava de pagamento, cron de
+lembretes e painel **100% mobile** (feito para usar no celular).
+
+## Stack
+
+| Camada | Tecnologia |
+|---|---|
+| Front-end | HTML5 + Tailwind CSS (CDN) + JavaScript Vanilla (mobile-first) |
+| Back-end | Node.js + Express |
+| Banco | SQLite via `node:sqlite` nativo (sem compilação) — arquivo persistente |
+| Deploy | Railway / Render / qualquer host Node 22.5+ com HTTPS |
+
+## Estrutura de arquivos
+
+```
+telegram/
+├── package.json
+├── .env.example          # chaves do Mercado Pago (placeholders) + variáveis de operação
+├── .gitignore
+├── README.md
+├── public/
+│   └── index.html        # painel mobile (login, bots, builder de fluxos, clientes, Pix)
+└── server/
+    ├── index.js          # app Express, webhook Telegram /tg/:botId, webhook MP /mp/webhook
+    ├── db.js             # SQLite (node:sqlite) e schema
+    ├── auth.js           # login por senha + cookie de sessão HttpOnly
+    ├── api.js            # REST do painel (/api/bots, /api/flows, /api/clients, /api/payments)
+    ├── engine.js         # máquina de estados: entrada de nó, Pix, avanço, webhooks
+    ├── telegram.js       # chamadas da API do Telegram (mensagens, mídia, botões, setWebhook)
+    ├── mercadopago.js    # criação de Pix (/v1/payments) e consulta de status
+    └── jobs.js           # inatividade (15s), sincronia de pagamentos (60s), lembrete (1h)
+```
+
+## 1. Rodar localmente
+
+```bash
+npm install
+copy .env.example .env      # Windows: copie e edite (use .env real, nunca versione)
+# edite o .env: ADMIN_PASSWORD, BASE_URL (opcional local), chaves do Mercado Pago
+npm start
+# abra http://localhost:3000
+```
+
+> Localmente os webhooks do Telegram/MP não funcionam (precisam de URL pública HTTPS).
+> Para validar a lógica rode o auto-teste: `npm test` (Telegram e MP mockados).
+
+## 2. Configuração (.env)
+
+```env
+MERCADO_PAGO_ACCESS_TOKEN=[cole aqui]
+MERCADO_PAGO_PUBLIC_KEY=[cole aqui]
+ADMIN_PASSWORD=[cole aqui]
+BASE_URL=https://seu-app.up.railway.app
+PORT=3000
+DATA_DIR=./data
+```
+
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `MERCADO_PAGO_ACCESS_TOKEN` | Sim | Access Token de produção (APP_USR-...) usado em `POST /v1/payments` |
+| `MERCADO_PAGO_PUBLIC_KEY` | Sim | Public Key (usada se você quiser checkout no front) |
+| `ADMIN_PASSWORD` | Sim | Senha do painel |
+| `BASE_URL` | Sim (produção) | URL pública HTTPS da app — é nela que os webhooks são registrados |
+| `DATA_DIR` | Não | Pasta do SQLite. Em produção use o volume (ex.: `/data`) |
+| `PORT` | Não | Porta HTTP (3000 por padrão; Railway/Render definem sozinhos) |
+
+**Segurança:** nunca commite o `.env`. Como as chaves do Mercado Pago apareceram em
+texto, gere novas chaves no painel do Mercado Pago (Suas integrações → suas credenciais)
+antes de publicar.
+
+## 3. Deploy no Railway (mais rápido)
+
+1. Crie um repositório no GitHub com este projeto e suba os arquivos.
+2. Em [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**.
+3. **Settings → Service → Networking** → copie o domínio gerado (ex.: `xxx.up.railway.app`).
+4. **Settings → Volume**: monte um disco em `/data` (persistência do SQLite).
+5. **Variables** do serviço:
+   - `ADMIN_PASSWORD` = sua senha
+   - `BASE_URL` = `https://xxx.up.railway.app` (sem barra no final)
+   - `MERCADO_PAGO_ACCESS_TOKEN` = `[sua chave]`
+   - `MERCADO_PAGO_PUBLIC_KEY` = `[sua chave]`
+   - `DATA_DIR` = `/data`
+6. **Settings → Build**: nada extra (o `npm install` automático basta).
+   O `engines.node >= 22.5` do `package.json` já força o Node compatível com `node:sqlite`.
+7. Deploy automático. Abra `https://xxx.up.railway.app`, faça login com `ADMIN_PASSWORD`.
+
+## 4. Deploy no Render
+
+1. **New → Web Service** → conecte o repositório.
+2. Build Command: `npm install` — Start Command: `npm start`.
+3. **Disk**: crie um disco e monte em `/data`.
+4. Environment: mesmas variáveis do passo 5 acima (`DATA_DIR=/data`).
+5. Use a URL pública gerada (`.onrender.com`) como `BASE_URL` e reinicie o serviço.
+
+## 5. Configuração no painel (pelo celular)
+
+1. **Aba Bots** → cole o token do **BotFather** → *Adicionar bot*.
+   O webhook `https://SEU-DOMINIO/tg/{id}` é registrado automaticamente (com secret).
+2. **Aba Fluxos** → escolha o bot → *+ Novo* → abra o fluxo.
+3. Monte os nós:
+   - **ID**: chave do nó (ex.: `inicio`, `pay`, `obrigado`)
+   - **Mensagem**: texto (aceita `<b>`, `<i>`, `<code>`)
+   - **URL de mídia**: foto ou vídeo enviados pelo bot
+   - **Inatividade (s)**: se o usuário não interagir, o fluxo avança sozinho para o *próximo nó*
+   - **Valor Pix**: `> 0` trava o nó e gera o Pix Copia e Cola + QR Code
+   - **Botões inline**: cada botão leva ao nó escolhido
+   - **Próximo nó**: usado quando não há botão (ou depois do pagamento aprovado)
+   - **Mensagem de lembrete**: texto do cron de 1 hora
+   - Defina o **nó inicial** no topo e toque em **Ativar**.
+4. **Aba Clientes**: veja em que nó cada usuário está (Ativo / Aguardando Pix / Concluído).
+5. **Aba Pix**: histórico de pagamentos com status.
+
+## 6. Mercado Pago — webhooks
+
+- O sistema já envia `notification_url` (`https://SEU-DOMINIO/mp/webhook`) em cada cobrança.
+- Por segurança, cadastre também em **Seu account → Configurações → Webhooks**:
+  - URL: `https://SEU-DOMINIO/mp/webhook`
+  - Evento: **Pagamentos**
+- Quando o status chega como `approved`, o usuário é desbloqueado e avança para o próximo nó.
+
+## 7. Comportamentos automáticos (jobs)
+
+| Job | Intervalo | O que faz |
+|---|---|---|
+| Inatividade | 15s | Avança para o *próximo nó* quando o timer do nó expira |
+| Sincronia de pagamentos | 60s | Confere status no MP (rede de segurança caso o webhook retraie) |
+| Lembrete/recuperação | 1h | Mensagem de reengajamento para Pix pendente/expirado ou fim de linha |
+
+## 8. Variáveis do Telegram
+
+- Cada bot tem um `secret_token` próprio: o endpoint `/tg/:id` valida o header
+  `X-Telegram-Bot-Api-Secret-Token`, impedindo falsificação de updates.
+- Comandos: `/start` reinicia o fluxo no nó inicial.

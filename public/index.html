@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#0f172a" />
+<title>Painel de Bots • Fluxos + Pix</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html,body{-webkit-tap-highlight-color:transparent}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .view{display:none}.view.active{display:block}
+  input,textarea,select{font-size:16px}
+  .sheet{position:fixed;inset:0;z-index:50;display:none}
+  .sheet.open{display:block}
+  .fade{animation:f .18s ease-out}
+  @keyframes f{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .card:active{transform:scale(.99)}
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-thumb{background:#334155;border-radius:9px}
+</style>
+</head>
+<body class="bg-slate-950 text-slate-100 pb-16">
+
+<!-- ================= LOGIN ================= -->
+<div id="loginScreen" class="fixed inset-0 z-40 bg-slate-950 flex items-center justify justify-center p-6">
+  <div class="w-full max-w-sm fade">
+    <div class="text-center mb-8">
+      <div class="text-5xl mb-3">🤖</div>
+      <h1 class="text-2xl font-bold">Painel de Bots</h1>
+      <p class="text-slate-400 text-sm mt-1">Fluxos visuais • Pix • Telegram</p>
+    </div>
+    <form id="loginForm" class="space-y-4">
+      <input id="loginPassword" type="password" placeholder="Senha de acesso"
+        class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 outline-none focus:border-indigo-500" />
+      <button class="w-full py-3 rounded-xl bg-indigo-600 font-semibold active:bg-indigo-500">Entrar</button>
+      <p id="loginError" class="text-red-400 text-sm text-center hidden"></p>
+    </form>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app" class="hidden">
+  <header class="sticky top-0 z-30 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span class="text-xl">🤖</span>
+      <div>
+        <div class="font-bold leading-tight">Painel de Bots</div>
+        <div id="headerSub" class="text-[11px] text-slate-400 leading-tight">Fluxos + Pix</div>
+      </div>
+    </div>
+    <button id="btnLogout" class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700">Sair</button>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-4 py-4">
+
+    <!-- ===== BOTS ===== -->
+    <section id="view-bots" class="view active">
+      <h2 class="font-bold text-lg mb-3">Meus Bots</h2>
+      <form id="formBot" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 mb-5">
+        <input id="botName" placeholder="Nome (ex.: Loja X)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 outline-none focus:border-indigo-500" />
+        <input id="botToken" placeholder="Token do BotFather (123456:ABC...)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 outline-none focus:border-indigo-500" />
+        <button class="w-full py-2.5 rounded-xl bg-indigo-600 font-semibold active:bg-indigo-500">+ Adicionar bot</button>
+        <p id="botMsg" class="text-xs hidden"></p>
+      </form>
+      <div id="botsList" class="space-y-3"></div>
+    </section>
+
+    <!-- ===== FLUXOS ===== -->
+    <section id="view-flows" class="view">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-bold text-lg">Fluxos</h2>
+        <button id="btnNewFlow" class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 font-semibold">+ Novo</button>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 mb-4">
+        <label class="text-xs text-slate-400">Bot do fluxo</label>
+        <select id="flowBotSelect" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700"></select>
+      </div>
+      <div id="flowsList" class="space-y-3"></div>
+    </section>
+
+    <!-- ===== CLIENTES ===== -->
+    <section id="view-clients" class="view">
+      <h2 class="font-bold text-lg mb-3">Clientes (estado)</h2>
+      <div id="clientsList" class="space-y-2"></div>
+    </section>
+
+    <!-- ===== PAGAMENTOS ===== -->
+    <section id="view-payments" class="view">
+      <h2 class="font-bold text-lg mb-3">Pagamentos Pix</h2>
+      <div id="paymentsList" class="space-y-2"></div>
+    </section>
+
+  </main>
+
+  <nav class="fixed bottom-0 inset-x-0 z-30 bg-slate-900 border-t border-slate-800 grid grid-cols-4 text-[11px]">
+    <button data-view="bots" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">🤖</span>Bots</button>
+    <button data-view="flows" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">🔀</span>Fluxos</button>
+    <button data-view="clients" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">👥</span>Clientes</button>
+    <button data-view="payments" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">💰</span>Pix</button>
+  </nav>
+</div>
+
+<!-- ================= EDITOR DE NÓ (SHEET) ================= -->
+<div id="nodeSheet" class="sheet bg-slate-950 overflow-y-auto">
+  <div class="sticky top-0 bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+    <button id="nodeBack" class="text-sm px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700">‹ Voltar</button>
+    <div class="font-semibold" id="nodeSheetTitle">Editar nó</div>
+    <button id="nodeDelete" class="text-sm px-3 py-1.5 rounded-lg bg-red-900/60 border border-red-800">Excluir</button>
+  </div>
+  <div class="p-4 max-w-2xl mx-auto space-y-4 pb-24">
+    <div>
+      <label class="text-xs text-slate-400">ID do nó (letras/números, sem espaço)</label>
+      <input id="nKey" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 outline-none focus:border-indigo-500" />
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Mensagem (texto — aceita HTML simples: &lt;b&gt;, &lt;i&gt;, &lt;code&gt;)</label>
+      <textarea id="nText" rows="5" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 outline-none focus:border-indigo-500"></textarea>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs text-slate-400">URL de mídia (foto/vídeo)</label>
+        <input id="nMedia" placeholder="https://..." class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700" />
+      </div>
+      <div>
+        <label class="text-xs text-slate-400">Tipo</label>
+        <select id="nMediaType" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700">
+          <option value="photo">Foto</option><option value="video">Vídeo</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs text-slate-400">Inatividade (segundos • 0 = off)</label>
+        <input id="nWait" type="number" min="0" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700" />
+      </div>
+      <div>
+        <label class="text-xs text-slate-400">Valor Pix (R$ • 0 = grátis)</label>
+        <input id="nPrice" type="number" min="0" step="0.01" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700" />
+      </div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Próximo nó (sem botão / após pagamento aprovado)</label>
+      <select id="nNext" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Mensagem de lembrete (cron 1h) — opcional</label>
+      <textarea id="nReminder" rows="2" placeholder="Ex.: Seu Pix ainda está pendente..." class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></textarea>
+    </div>
+
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <label class="text-xs text-slate-400">Botões inline (cada um leva a um nó)</label>
+        <button id="btnAddButton" class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 font-semibold">+ Botão</button>
+      </div>
+      <div id="buttonsEditor" class="space-y-2"></div>
+    </div>
+  </div>
+  <div class="fixed bottom-0 inset-x-0 p-3 bg-slate-900/95 border-t border-slate-800">
+    <button id="nodeSave" class="w-full py-3 rounded-xl bg-emerald-600 font-semibold active:bg-emerald-500">Salvar nó</button>
+  </div>
+</div>
+
+<!-- ================= VISUALIZADOR DE FLUXO (SHEET) ================= -->
+<div id="flowSheet" class="sheet bg-slate-950 overflow-y-auto">
+  <div class="sticky top-0 bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+    <button id="flowBack" class="text-sm px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700">‹ Voltar</button>
+    <div class="font-semibold" id="flowSheetTitle">Fluxo</div>
+    <button id="flowActivate" class="text-xs px-3 py-1.5 rounded-lg bg-emerald-800 border border-emerald-700">Ativar</button>
+  </div>
+  <div class="p-4 max-w-2xl mx-auto pb-28">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 mb-4">
+      <label class="text-xs text-slate-400">Nó inicial (/start)</label>
+      <select id="flowStart" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700"></select>
+    </div>
+    <div id="nodesList" class="space-y-3"></div>
+    <button id="btnAddNode" class="w-full mt-4 py-3 rounded-xl border-2 border-dashed border-slate-700 text-slate-300 font-semibold active:bg-slate-900">+ Adicionar nó</button>
+  </div>
+</div>
+
+<script>
+/* ================= helpers ================= */
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtMoney = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',');
+const fmtDate = (t) => t ? new Date(t).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '-';
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    method: opts.method || (opts.body ? 'POST' : 'GET'),
+    headers: { 'Content-Type': 'application/json' },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Erro ' + res.status);
+  return data;
+}
+
+function toast(msg, ok = true) {
+  const el = document.createElement('div');
+  el.className = 'fixed z-50 left-1/2 -translate-x-1/2 top-4 px-4 py-2 rounded-xl text-sm shadow-lg ' +
+    (ok ? 'bg-emerald-700' : 'bg-red-700');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+
+/* ================= auth ================= */
+function showLogin() { $('#loginScreen').classList.remove('hidden'); $('#app').classList.add('hidden'); }
+function showApp() { $('#loginScreen').classList.add('hidden'); $('#app').classList.remove('hidden'); }
+
+$('#loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('#loginError'); err.classList.add('hidden');
+  try {
+    await api('/login', { body: { password: $('#loginPassword').value } });
+    showApp(); loadBots();
+  } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
+});
+
+$('#btnLogout').addEventListener('click', async () => { await api('/logout', { method: 'POST' }); showLogin(); });
+
+/* ================= navegação ================= */
+function go(view) {
+  $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + view));
+  $$('.navbtn').forEach((b) => {
+    const on = b.dataset.view === view;
+    b.classList.toggle('text-indigo-400', on);
+    b.classList.toggle('text-slate-400', !on);
+  });
+  if (view === 'bots') loadBots();
+  if (view === 'flows') initFlows();
+  if (view === 'clients') loadClients();
+  if (view === 'payments') loadPayments();
+}
+$$('.navbtn').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
+
+/* ================= BOTS ================= */
+async function loadBots() {
+  const bots = await api('/bots');
+  const box = $('#botsList');
+  if (!bots.length) { box.innerHTML = '<p class="text-slate-500 text-sm text-center py-6">Nenhum bot ainda. Cole um token acima.</p>'; return; }
+  box.innerHTML = bots.map((b) => `
+    <div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4">
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="font-semibold truncate">${esc(b.name)}</div>
+          <div class="text-[11px] text-slate-500 truncate">ID ${b.id} • criado ${fmtDate(b.created_at)}</div>
+          <div class="text-[11px] ${b.webhook_url ? 'text-emerald-400' : 'text-amber-400'} break-all mt-1">
+            ${b.webhook_url ? '✔ webhook: ' + esc(b.webhook_url) : '⚠ webhook não configurado'}
+          </div>
+        </div>
+        <div class="flex flex-col gap-2 shrink-0">
+          <button data-webhook="${b.id}" class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700">Webhook</button>
+          <button data-delbot="${b.id}" class="text-xs px-3 py-1.5 rounded-lg bg-red-900/60 border border-red-800">Excluir</button>
+        </div>
+      </div>
+    </div>`).join('');
+
+  box.querySelectorAll('[data-delbot]').forEach((el) => el.onclick = async () => {
+    if (!confirm('Excluir este bot?')) return;
+    await api('/bots/' + el.dataset.delbot, { method: 'DELETE' }); loadBots();
+  });
+  box.querySelectorAll('[data-webhook]').forEach((el) => el.onclick = async () => {
+    try { const r = await api('/bots/' + el.dataset.webhook + '/webhook', { method: 'POST' }); toast('Webhook: ' + r.url); }
+    catch (e) { toast(e.message, false); }
+    loadBots();
+  });
+}
+
+$('#formBot').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('#botMsg'); msg.classList.add('hidden');
+  try {
+    const b = await api('/bots', { body: { name: $('#botName').value, token: $('#botToken').value } });
+    msg.textContent = b.warning ? '⚠ ' + b.warning : '✔ Bot adicionado e webhook ativado.';
+    msg.className = 'text-xs ' + (b.warning ? 'text-amber-400' : 'text-emerald-400');
+    $('#botToken').value = ''; $('#botName').value = '';
+    loadBots();
+  } catch (ex) { msg.textContent = ex.message; msg.className = 'text-xs text-red-400'; }
+  msg.classList.remove('hidden');
+});
+
+/* ================= FLUXOS ================= */
+let botsCache = [];
+let flowsCache = [];
+let currentFlow = null; // cópia de trabalho
+
+async function initFlows() {
+  botsCache = await api('/bots');
+  const sel = $('#flowBotSelect');
+  const prev = sel.value;
+  sel.innerHTML = botsCache.length
+    ? botsCache.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join('')
+    : '<option value="">— cadastre um bot primeiro —</option>';
+  if (prev) sel.value = prev;
+  loadFlowsList();
+}
+$('#flowBotSelect').addEventListener('change', loadFlowsList);
+
+async function loadFlowsList() {
+  const botId = $('#flowBotSelect').value;
+  flowsCache = botId ? await api('/flows?bot_id=' + botId) : [];
+  const box = $('#flowsList');
+  if (!flowsCache.length) { box.innerHTML = '<p class="text-slate-500 text-sm text-center py-6">Nenhum fluxo. Toque em "+ Novo".</p>'; return; }
+  box.innerHTML = flowsCache.map((f) => {
+    const n = Object.keys(f.data.nodes || {}).length;
+    return `<div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
+      <div>
+        <div class="font-semibold">${esc(f.name)}</div>
+        <div class="text-[11px] text-slate-500">${n} nó(s) • id ${f.id}</div>
+      </div>
+      <button data-open="${f.id}" class="text-xs px-3 py-2 rounded-lg bg-indigo-600 font-semibold">Abrir</button>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('[data-open]').forEach((el) => el.onclick = () => openFlow(Number(el.dataset.open)));
+}
+
+$('#btnNewFlow').addEventListener('click', async () => {
+  const botId = $('#flowBotSelect').value;
+  if (!botId) return toast('Cadastre um bot primeiro', false);
+  const f = await api('/flows', { body: { bot_id: Number(botId), name: 'Fluxo ' + (flowsCache.length + 1) } });
+  await loadFlowsList(); openFlow(f.id);
+});
+
+function normalize(flow) {
+  flow.data.nodes = flow.data.nodes || {};
+  flow.data.order = (flow.data.order || []).filter((k) => flow.data.nodes[k]);
+  Object.keys(flow.data.nodes).forEach((k) => { if (!flow.data.order.includes(k)) flow.data.order.push(k); });
+  if (!flow.data.nodes[flow.data.start]) flow.data.start = flow.data.order[0] || '';
+  return flow;
+}
+
+async function openFlow(id) {
+  const f = normalize(await api('/flows/' + id));
+  currentFlow = f;
+  $('#flowSheetTitle').textContent = f.name;
+  renderFlowSheet();
+  $('#flowSheet').classList.add('open');
+}
+$('#flowBack').addEventListener('click', async () => {
+  await saveFlow(false);
+  $('#flowSheet').classList.remove('open');
+  loadFlowsList();
+});
+$('#flowActivate').addEventListener('click', async () => {
+  await saveFlow(false);
+  await api('/flows/' + currentFlow.id + '/activate', { method: 'POST' });
+  toast('Fluxo ativado neste bot');
+});
+
+function nodeOptions(selected, includeEnd = true) {
+  const keys = currentFlow.data.order;
+  let html = includeEnd ? '<option value="">— nenhum / fim —</option>' : '<option value="">— selecione —</option>';
+  html += keys.map((k) => `<option value="${esc(k)}" ${k === selected ? 'selected' : ''}>${esc(k)}</option>`).join('');
+  return html;
+}
+
+function renderFlowSheet() {
+  const start = $('#flowStart');
+  start.innerHTML = nodeOptions(currentFlow.data.start, false);
+  start.onchange = () => { currentFlow.data.start = start.value; saveFlow(false); };
+
+  const box = $('#nodesList');
+  if (!currentFlow.data.order.length) {
+    box.innerHTML = '<p class="text-slate-500 text-sm text-center py-6">Fluxo vazio. Adicione o primeiro nó.</p>';
+    return;
+  }
+  box.innerHTML = currentFlow.data.order.map((k, i) => {
+    const n = currentFlow.data.nodes[k];
+    const badge = Number(n.price) > 0
+      ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900 text-emerald-300">Pix ' + fmtMoney(n.price) + '</span>'
+      : '<span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">grátis</span>';
+    const wait = Number(n.wait) > 0 ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-900 text-amber-300">⏱ ${n.wait}s</span>` : '';
+    const start_ = currentFlow.data.start === k ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300">INÍCIO</span>' : '';
+    const btns = (n.buttons || []).map((b) => `→ <b>${esc(b.label)}</b> (${esc(b.to || 'fim')})`).join(' • ');
+    return `<div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4" data-node="${esc(k)}">
+      <div class="flex items-center justify-between gap-2">
+        <div class="font-semibold truncate">${i + 1}. ${esc(k)}</div>
+        <div class="flex gap-1 flex-wrap justify-end">${start_} ${badge} ${wait}</div>
+      </div>
+      <p class="text-xs text-slate-400 mt-1 line-clamp-2">${esc((n.text || '').slice(0, 120)) || '(sem texto)'}</p>
+      ${btns ? `<p class="text-[11px] text-slate-500 mt-1">${btns}</p>` : ''}
+      ${n.next ? `<p class="text-[11px] text-slate-500">próximo: ${esc(n.next)}</p>` : ''}
+    </div>`;
+  }).join('');
+  box.querySelectorAll('[data-node]').forEach((el) => el.onclick = () => openNode(el.dataset.node));
+}
+
+async function saveFlow(silent) {
+  if (!currentFlow) return;
+  try {
+    currentFlow = normalize(await api('/flows/' + currentFlow.id, { method: 'PUT', body: { data: currentFlow.data } }));
+    if (!silent) toast('Fluxo salvo');
+  } catch (e) { toast(e.message, false); }
+}
+
+/* ================= editor de nó ================= */
+let editingKey = null;
+
+$('#btnAddNode').addEventListener('click', () => {
+  let i = currentFlow.data.order.length + 1;
+  let key = 'no' + i;
+  while (currentFlow.data.nodes[key]) { i++; key = 'no' + i; }
+  currentFlow.data.nodes[key] = { key, text: 'Nova mensagem', media: '', media_type: 'photo', wait: 0, price: 0, buttons: [], next: '', reminder: '' };
+  currentFlow.data.order.push(key);
+  if (!currentFlow.data.start) currentFlow.data.start = key;
+  openNode(key);
+});
+
+function openNode(key) {
+  editingKey = key;
+  const n = currentFlow.data.nodes[key];
+  $('#nodeSheetTitle').textContent = 'Nó: ' + key;
+  $('#nKey').value = key;
+  $('#nText').value = n.text || '';
+  $('#nMedia').value = n.media || '';
+  $('#nMediaType').value = n.media_type === 'video' ? 'video' : 'photo';
+  $('#nWait').value = n.wait || 0;
+  $('#nPrice').value = n.price || 0;
+  $('#nNext').innerHTML = nodeOptions(n.next || '');
+  $('#nReminder').value = n.reminder || '';
+  renderButtonsEditor(n.buttons || []);
+  $('#nodeSheet').classList.add('open');
+}
+
+function renderButtonsEditor(buttons) {
+  const box = $('#buttonsEditor');
+  if (!buttons.length) { box.innerHTML = '<p class="text-xs text-slate-500">Sem botões — o fluxo segue por "próximo nó".</p>'; return; }
+  box.innerHTML = buttons.map((b, i) => `
+    <div class="flex gap-2 items-center">
+      <input data-bl="${i}" value="${esc(b.label)}" placeholder="Rótulo" class="flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700" />
+      <select data-bt="${i}" class="w-32 px-2 py-2 rounded-xl bg-slate-950 border border-slate-700">${nodeOptions(b.to)}</select>
+      <button data-bd="${i}" class="px-2.5 py-2 rounded-xl bg-red-900/60 border border-red-800 text-sm">✕</button>
+    </div>`).join('');
+  box.querySelectorAll('[data-bl]').forEach((el) => el.oninput = () => { buttons[+el.dataset.bl].label = el.value; });
+  box.querySelectorAll('[data-bt]').forEach((el) => el.onchange = () => { buttons[+el.dataset.bt].to = el.value; });
+  box.querySelectorAll('[data-bd]').forEach((el) => el.onclick = () => { buttons.splice(+el.dataset.bd, 1); renderButtonsEditor(buttons); });
+}
+
+$('#btnAddButton').addEventListener('click', () => {
+  const n = currentFlow.data.nodes[editingKey];
+  n.buttons = n.buttons || [];
+  n.buttons.push({ label: 'Botão ' + (n.buttons.length + 1), to: currentFlow.data.order.find((k) => k !== editingKey) || '' });
+  renderButtonsEditor(n.buttons);
+});
+
+$('#nodeBack').addEventListener('click', () => $('#nodeSheet').classList.remove('open'));
+
+$('#nodeDelete').addEventListener('click', () => {
+  if (!confirm('Excluir o nó "' + editingKey + '"?')) return;
+  delete currentFlow.data.nodes[editingKey];
+  currentFlow.data.order = currentFlow.data.order.filter((k) => k !== editingKey);
+  Object.values(currentFlow.data.nodes).forEach((n) => {
+    (n.buttons || []).forEach((b) => { if (b.to === editingKey) b.to = ''; });
+    if (n.next === editingKey) n.next = '';
+  });
+  if (currentFlow.data.start === editingKey) currentFlow.data.start = currentFlow.data.order[0] || '';
+  $('#nodeSheet').classList.remove('open');
+  renderFlowSheet(); saveFlow(true);
+});
+
+$('#nodeSave').addEventListener('click', () => {
+  const oldKey = editingKey;
+  const newKey = ($('#nKey').value || '').trim().replace(/\s+/g, '_');
+  if (!newKey) return toast('Dê um ID ao nó', false);
+  if (newKey !== oldKey && currentFlow.data.nodes[newKey]) return toast('Já existe um nó com esse ID', false);
+
+  const n = currentFlow.data.nodes[oldKey];
+  const text = { key: newKey, text: $('#nText').value, media: $('#nMedia').value.trim(), media_type: $('#nMediaType').value,
+    wait: Number($('#nWait').value) || 0, price: Number($('#nPrice').value) || 0,
+    buttons: n.buttons || [], next: $('#nNext').value, reminder: $('#nReminder').value };
+
+  if (newKey !== oldKey) {
+    delete currentFlow.data.nodes[oldKey];
+    currentFlow.data.order = currentFlow.data.order.map((k) => (k === oldKey ? newKey : k));
+    Object.values(currentFlow.data.nodes).forEach((x) => {
+      (x.buttons || []).forEach((b) => { if (b.to === oldKey) b.to = newKey; });
+      if (x.next === oldKey) x.next = newKey;
+    });
+    if (currentFlow.data.start === oldKey) currentFlow.data.start = newKey;
+  }
+  currentFlow.data.nodes[newKey] = text;
+  editingKey = newKey;
+  $('#nodeSheet').classList.remove('open');
+  renderFlowSheet(); saveFlow(true);
+});
+
+/* ================= clientes / pagamentos ================= */
+const statusLabel = { active: 'Ativo', waiting_payment: 'Aguardando Pix', done: 'Concluído' };
+const statusColor = { active: 'bg-sky-900 text-sky-300', waiting_payment: 'bg-amber-900 text-amber-300', done: 'bg-emerald-900 text-emerald-300' };
+
+async function loadClients() {
+  const rows = await api('/clients');
+  $('#clientsList').innerHTML = rows.length ? rows.map((c) => `
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <div class="text-sm font-semibold truncate">👤 ${esc(c.chat_id)} <span class="text-slate-500 font-normal">• ${esc(c.bot_name || 'bot ' + c.bot_id)}</span></div>
+        <div class="text-[11px] text-slate-500">nó: ${esc(c.node_key || '-')} • atualizado ${fmtDate(c.updated_at)}</div>
+      </div>
+      <span class="text-[10px] px-2 py-1 rounded-full shrink-0 ${statusColor[c.status] || 'bg-slate-800'}">${statusLabel[c.status] || c.status}</span>
+    </div>`).join('') : '<p class="text-slate-500 text-sm text-center py-6">Nenhum cliente interagiu ainda.</p>';
+}
+
+const payColor = { approved: 'bg-emerald-900 text-emerald-300', pending: 'bg-amber-900 text-amber-300', expired: 'bg-slate-800 text-slate-300', rejected: 'bg-red-900 text-red-300', cancelled: 'bg-slate-800 text-slate-300' };
+
+async function loadPayments() {
+  const rows = await api('/payments');
+  $('#paymentsList').innerHTML = rows.length ? rows.map((p) => `
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <div class="text-sm font-semibold">${fmtMoney(p.amount)} <span class="text-slate-500 font-normal">• ${esc(p.bot_name || '')}</span></div>
+        <div class="text-[11px] text-slate-500 truncate">👤 ${esc(p.chat_id)} • nó ${esc(p.node_key)} • ${fmtDate(p.created_at)}</div>
+        <div class="text-[11px] text-slate-600 truncate">MP: ${esc(p.mp_id || '-')}</div>
+      </div>
+      <span class="text-[10px] px-2 py-1 rounded-full shrink-0 ${payColor[p.status] || 'bg-slate-800'}">${esc(p.status)}</span>
+    </div>`).join('') : '<p class="text-slate-500 text-sm text-center py-6">Nenhum pagamento gerado ainda.</p>';
+}
+
+/* ================= boot ================= */
+(async function boot() {
+  try { await api('/me'); showApp(); go('bots'); }
+  catch (e) { showLogin(); }
+})();
+</script>
+</body>
+</html>
