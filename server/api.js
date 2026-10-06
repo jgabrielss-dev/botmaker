@@ -30,7 +30,16 @@ router.get('/health', (req, res) =>
     adminPassword: !!process.env.ADMIN_PASSWORD,
     mpToken: (process.env.MERCADO_PAGO_ACCESS_TOKEN || '').startsWith('[cole') ? 'placeholder' : !!process.env.MERCADO_PAGO_ACCESS_TOKEN,
     bots: db.prepare('SELECT COUNT(*) c FROM bots').get().c,
-    flows: db.prepare('SELECT COUNT(*) c FROM flows').get().c
+    flows: db.prepare('SELECT COUNT(*) c FROM flows').get().c,
+    debug: {
+      node: process.version,
+      railway: process.env.RAILWAY_ENVIRONMENT || null,
+      service: process.env.RAILWAY_SERVICE_NAME || null,
+      envCount: Object.keys(process.env).length,
+      found: ['ADMIN_PASSWORD', 'BASE_URL', 'MERCADO_PAGO_ACCESS_TOKEN', 'MERCADO_PAGO_PUBLIC_KEY', 'DATA_DIR'].filter(
+        (k) => process.env[k] !== undefined
+      )
+    }
   })
 );
 
