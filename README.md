@@ -75,20 +75,27 @@ antes de publicar.
 
 1. Crie um repositório no GitHub com este projeto e suba os arquivos.
 2. Em [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**.
-3. **Settings → Networking** → copie o domínio gerado (ex.: `xxx.up.railway.app`).
-4. **Volumes** (aba do serviço): **Add Volume → Mount Path = `/data`** e depois
+3. **Não precisa de domínio próprio**: Railway gera um gratuito. Na tela do projeto,
+   clique no serviço → aba **Networking** → **Generate Domain** → copie o endereço
+   (ex.: `xxx.up.railway.app`). Sem essa ação, não existe link público.
+4. **Volumes** (aba do serviço): **+ New → Volume → Mount Path = `/data`** e depois
    **Deploy → Redeploy** (sem isso o `/data` não existe e o `DATA_DIR=/data` não serve).
-5. **Variables** do serviço:
+   Se a opção não existir na sua conta, não cadastre `DATA_DIR` (o app sobe em pasta
+   temporária, mas os dados são apagados a cada deploy).
+5. **Shared variables / Variables** do serviço:
    - `ADMIN_PASSWORD` = sua senha
    - `BASE_URL` = `https://xxx.up.railway.app` (sem barra no final)
    - `MERCADO_PAGO_ACCESS_TOKEN` = `[sua chave]`
    - `MERCADO_PAGO_PUBLIC_KEY` = `[sua chave]`
-   - `DATA_DIR` = `/data`
-6. **Settings → Build**: nada extra (o `npm install` automático basta).
+   - `DATA_DIR` = `/data` **(somente com volume montado)**
+   - `NODE_VERSION` = `22.5.0` (opcional, de segurança)
+6. Build: nada extra (o `npm install` automático basta).
    O `engines.node >= 22.5` do `package.json` já força o Node compatível com `node:sqlite`.
 7. Deploy automático. Abra `https://xxx.up.railway.app`, faça login com `ADMIN_PASSWORD`.
 
-Se o serviço não subir, veja os logs: a primeira linha diz `Banco de dados em: ...`.
+**Logs**: Deployments → clique no último deploy → aba **Logs**. O esperado é:
+`Banco de dados em: /data/app.db` e `Painel rodando na porta 3000`.
+Se aparecer `ERRO: Node ... exige Node >= 22.5`, adicione `NODE_VERSION=22.5.0`.
 Sem volume, o app ainda sobe (usa pasta temporária) mas **apaga os dados a cada deploy**.
 
 Teste depois de publicar: `https://SEU-DOMINIO/api/health` — mostra `dataDir`, se o
