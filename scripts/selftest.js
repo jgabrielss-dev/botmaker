@@ -110,6 +110,16 @@ global.fetch = async (url, opts) => {
   assert.strictEqual(auth.login('errada'), null);
   console.log('7. autenticacao OK');
 
+  // 8) senha com aspas/espacos coladas no Railway ainda entra
+  process.env.ADMIN_PASSWORD = '  "Segredo 123"  ';
+  assert.ok(auth.login('Segredo 123'), 'deveria aceitar sem aspas/espacos');
+  assert.ok(auth.login(' Segredo 123 '), 'deveria ignorar espacos do usuario');
+  assert.strictEqual(auth.login('errada'), null);
+  assert.ok(auth.passwordIssues().length >= 1, 'deveria apontar aspas/espacos');
+  delete process.env.ADMIN_PASSWORD;
+  assert.ok(auth.login('admin'), 'padrao admin deveria valer sem a variavel');
+  console.log('8. normalizacao de senha OK');
+
   console.log('\nTODOS OS TESTES PASSARAM');
   process.exit(0);
 })().catch((e) => {

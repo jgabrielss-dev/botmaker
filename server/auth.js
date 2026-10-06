@@ -7,9 +7,34 @@ function hashPassword(pw) {
   return crypto.createHash('sha256').update('panel:' + pw).digest('hex');
 }
 
+/* remove aspas e espaços que costumam sobrar ao colar a senha no Railway */
+function clean(pw) {
+  let s = String(pw == null ? '' : pw).trim();
+  if ((s.startsWith('"') && s.endsWith('"') && s.length > 1) || (s.startsWith("'") && s.endsWith("'") && s.length > 1)) {
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+function expectedPassword() {
+  const raw = process.env.ADMIN_PASSWORD;
+  if (raw === undefined || raw === '') return 'admin';
+  return clean(raw);
+}
+
+function passwordIssues() {
+  const raw = process.env.ADMIN_PASSWORD;
+  if (!raw) return [];
+  const out = [];
+  if (raw !== raw.trim()) out.push('espaços sobrando');
+  if (/^["'].*["']$/.test(raw.trim())) out.push('aspas');
+  if (/[\r\n]/.test(raw)) out.push('quebra de linha');
+  if (/^\[cole aqui\]$/i.test(raw.trim())) out.push('está com o texto de exemplo [cole aqui]');
+  return out;
+}
 function login(password) {
-  const expected = process.env.ADMIN_PASSWORD || 'admin';
-  if (!password || hashPassword(password) !== hashPassword(expected)) return null;
+  if (!password) return null;
+  if (clean(password) !== expectedPassword()) return null;
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO sessions (token, created_at) VALUES (?, ?)').run(token, Date.now());
   return token;
@@ -43,7 +68,7 @@ function parseCookies(req) {
 function requireAuth(req, res, next) {
   const cookies = parseCookies(req);
   if (valid(cookies.sid)) return next();
-  res.status(401).json({ error: 'unauthorized' });
+  res.status(401).json({ error: 'Sessão expirada, entre novamente' });
 }
 
-module.exports = { login, logout, valid, requireAuth, parseCookies };
+module.exports = { login, logout, valid, requireAuth, parseCookies, passwordIssues, expectedPassword };
