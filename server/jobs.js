@@ -17,11 +17,10 @@ function tickInactivity() {
       if (!node) continue;
       const wait = Number(node.wait || 0);
       if (wait <= 0) continue;
-      // destino da inatividade: no marcado no FLUXO (toggle "este e o no da inatividade"),
-      // senao o campo legado do no, senao o proximo no. Nunca volta para o proprio no.
-      const target = String(
-        (flow.json && flow.json.inactivity_node) || node.wait_node || node.next || ''
-      ).trim();
+      // destino da inatividade: NO DE LEMBRETE do proprio no (onde o cliente vai quando
+      // o tempo definido passa sem resposta), senao o campo legado wait_node, senao o proximo.
+      // Nunca volta para o proprio no.
+      const target = String(node.reminder_node || node.wait_node || node.next || '').trim();
       if (!target || target === client.node_key) continue;
       if (now - client.last_activity < wait * 1000) continue;
       E.updateClient(client.id, { last_activity: now, updated_at: now });
@@ -87,17 +86,21 @@ function tickReminders() {
         const hasPath =
           (node.buttons && node.buttons.length > 0) ||
           !!node.next ||
-          (Number(node.wait || 0) > 0 && !!node.wait_node);
+          (Number(node.wait || 0) > 0 && (!!node.reminder_node || !!node.wait_node));
         if (!hasPath) reason = 'end';
       }
       if (!reason) continue;
 
       E.updateClient(client.id, { last_reminder: now, updated_at: now });
 
-      // No dedicado ao cron de 1h: SEMPRE usado quando nao ha caminho (fim de linha ou Pix travado)
-      const reminderNode = String(node.reminder_node || '').trim();
-      if (reminderNode && reminderNode !== client.node_key && E.getNode(flow, reminderNode)) {
-        E.advance(bot, client, flow, reminderNode).catch((e) => console.error('reminder advance:', e.message));
+      // Beco sem saida (fim de linha ou Pix travado): o NO DA INATIVIDADE do fluxo
+      // recebe o cliente e dali em diante os botoes/next/inatividade dele puxam o
+      // usuario de volta para dentro do fluxo.
+      const inactivityNode = String((flow.json && flow.json.inactivity_node) || '').trim();
+      if (inactivityNode && inactivityNode !== client.node_key && E.getNode(flow, inactivityNode)) {
+        E.advance(bot, client, flow, inactivityNode).catch((e) =>
+          console.error('inactivity-node advance:', e.message)
+        );
         continue;
       }
 

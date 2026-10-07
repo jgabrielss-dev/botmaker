@@ -123,24 +123,27 @@ com processo contínuo + disco (Railway/Render) ou PostgreSQL.
 
 1. **Aba Bots** → cole o token do **BotFather** → *Adicionar bot*.
    O webhook `https://SEU-DOMINIO/tg/{id}` é registrado automaticamente (com secret).
-2. **Aba Fluxos** → escolha o bot → *+ Novo* → abra o fluxo.
+2. No card do bot, toque em **🔀 Abrir fluxo deste bot**: cada bot tem **um único fluxo**
+   (menu *filho* do bot). O fluxo é criado automaticamente ao abrir a primeira vez.
 3. Monte os nós:
    - **ID**: chave do nó (ex.: `inicio`, `pay`, `obrigado`)
    - **Mensagem**: texto (aceita `<b>`, `<i>`, `<code>`)
    - **Mídias**: *várias* URLs e/ou arquivos do aparelho (📎) — foto/vídeo/pdf/áudio.
      O texto do nó vira legenda da **primeira** mídia (fallback: texto separado); os
      arquivos locais ficam em `DATA_DIR/uploads/` e vão ao Telegram como multipart
-   - **Inatividade (s)**: se o usuário não interagir, o fluxo avança sozinho
-   - **Este é o nó da inatividade** (marcador do fluxo, só 1 por fluxo): quando o tempo
-     de *qualquer* nó expirar, o cliente vem pra cá. O próprio nó atual nunca é alvo
-     (sem loop). Sem marcador, cai no campo antigo `wait_node` (se existir) ou no
-     *próximo nó*
+   - **Inatividade (s)**: contagem regressiva de resposta do usuário neste nó
+   - **Nó de retorno** (nó de lembrete): para onde o cliente vai quando o **tempo de
+     inatividade deste nó expira sem resposta** (vazio = usar o *próximo nó*).
+     O próprio nó nunca é alvo (sem loop)
+   - **Este é o nó da inatividade** (marcador do **fluxo**, só 1): RECEBE o cliente
+     quando o fluxo fica **sem caminho** (fim de linha ou Pix travado) — o cron de 1h
+     o traz pra cá e, daqui, os botões/próximo nó/inatividade dele puxam o usuário
+     de volta pra dentro do fluxo
    - **Valor Pix**: `> 0` trava o nó e gera o Pix Copia e Cola + QR Code
    - **Botões inline**: cada botão leva ao nó escolhido
    - **Próximo nó**: usado quando não há botão (ou depois do pagamento aprovado)
-   - **Nó do lembrete**: nó usado pelo cron de 1 hora **sempre que não houver caminho**
-     (fim de linha ou Pix travado)
-   - **Mensagem de lembrete**: texto usado apenas se o *Nó do lembrete* estiver vazio
+   - **Mensagem de lembrete**: texto enviado pelo cron de 1h **só quando o fluxo não
+     tem pra onde levar o cliente** e não há nó da inatividade marcado
    - **Convite de uso único**: grupo (cadastrado na aba 📢 Grupos) cujo link de
      **1 pessoa só** (`member_limit=1`) é enviado **depois** da mensagem deste nó
    - Defina o **nó inicial** no topo e toque em **Ativar**.
@@ -161,9 +164,9 @@ com processo contínuo + disco (Railway/Render) ou PostgreSQL.
 
 | Job | Intervalo | O que faz |
 |---|---|---|
-| Inatividade | 15s | Avança para o *nó marcado como inatividade* no fluxo (ou o `wait_node` antigo, ou o próximo nó) quando o timer do nó expira |
+| Inatividade | 15s | Quando o timer do nó expira, avança para o *nó de retorno* daquele nó (ou o `wait_node` antigo, ou o próximo nó) |
 | Sincronia de pagamentos | 60s | Confere status no MP (rede de segurança caso o webhook retraie) |
-| Lembrete/recuperação | 1h | Quando não há caminho (Pix travado ou fim de linha): vai para o *nó do lembrete*; sem nó definido, envia o texto de lembrete |
+| Lembrete/recuperação | 1h | **Beco sem saída** (Pix travado ou fim de linha): leva o cliente para o *nó da inatividade* marcado no fluxo; sem marcador, reenvia o *texto de lembrete* do nó atual |
 
 ## 8. Variáveis do Telegram
 

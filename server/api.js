@@ -137,6 +137,21 @@ router.post('/bots/:id/webhook', async (req, res) => {
   }
 });
 
+router.get('/bots/:id/flow', (req, res) => {
+  const bot = E.getBot(Number(req.params.id));
+  if (!bot) return res.status(404).json({ error: 'Bot não encontrado' });
+  let row = bot.flow_id ? db.prepare('SELECT * FROM flows WHERE id = ?').get(bot.flow_id) : null;
+  if (!row) {
+    // cada bot tem UM unico fluxo: cria automaticamente se ainda nao existir
+    const info = db
+      .prepare('INSERT INTO flows (bot_id, name, data, created_at) VALUES (?, ?, ?, ?)')
+      .run(bot.id, 'Fluxo', JSON.stringify({ start: '', order: [], nodes: {} }), Date.now());
+    db.prepare('UPDATE bots SET flow_id = ? WHERE id = ?').run(info.lastInsertRowid, bot.id);
+    row = db.prepare('SELECT * FROM flows WHERE id = ?').get(info.lastInsertRowid);
+  }
+  res.json(flowJson(row));
+});
+
 /* ---------- Fluxos ---------- */
 function flowJson(row) {
   let data;

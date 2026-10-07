@@ -67,19 +67,6 @@
       <div id="botsList" class="space-y-3"></div>
     </section>
 
-    <!-- ===== FLUXOS ===== -->
-    <section id="view-flows" class="view">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="font-bold text-lg">Fluxos</h2>
-        <button id="btnNewFlow" class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 font-semibold">+ Novo</button>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 mb-4">
-        <label class="text-xs text-slate-400">Bot do fluxo</label>
-        <select id="flowBotSelect" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700"></select>
-      </div>
-      <div id="flowsList" class="space-y-3"></div>
-    </section>
-
     <!-- ===== CLIENTES ===== -->
     <section id="view-clients" class="view">
       <h2 class="font-bold text-lg mb-3">Clientes (estado)</h2>
@@ -107,9 +94,8 @@
 
   </main>
 
-  <nav class="fixed bottom-0 inset-x-0 z-30 bg-slate-900 border-t border-slate-800 grid grid-cols-5 text-[11px]">
+  <nav class="fixed bottom-0 inset-x-0 z-30 bg-slate-900 border-t border-slate-800 grid grid-cols-4 text-[11px]">
     <button data-view="bots" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">🤖</span>Bots</button>
-    <button data-view="flows" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">🔀</span>Fluxos</button>
     <button data-view="groups" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">📢</span>Grupos</button>
     <button data-view="clients" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">👥</span>Clientes</button>
     <button data-view="payments" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">💰</span>Pix</button>
@@ -158,7 +144,7 @@
       <input type="checkbox" id="nIsInactivity" class="mt-1 w-5 h-5 accent-indigo-500 shrink-0" />
       <span>
         <span class="text-sm font-semibold block">Este é o nó da inatividade</span>
-        <span id="inactivityHint" class="text-[11px] text-slate-400">Quando o tempo de um nó expirar, o cliente vem pra cá. Só pode estar marcado em <b>1 nó por fluxo</b>.</span>
+        <span id="inactivityHint" class="text-[11px] text-slate-400">Quando o fluxo fica sem caminho (fim de linha / Pix travado), o cron de 1h traz o cliente pra cá — e daqui ele volta pro fluxo pelos botões/próximo nó. Só <b>1 por fluxo</b>.</span>
       </span>
     </label>
     <div>
@@ -166,7 +152,7 @@
       <select id="nNext" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
     </div>
     <div>
-      <label class="text-xs text-slate-400">Nó do lembrete (cron 1h) — leva o cliente pra cá SEMPRE que não houver caminho</label>
+      <label class="text-xs text-slate-400">Nó de retorno — onde o cliente vai quando o tempo de inatividade deste nó (acima) expira sem resposta</label>
       <select id="nReminderNode" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
     </div>
     <div>
@@ -175,7 +161,7 @@
       <p class="text-[11px] text-slate-500 mt-1">Cadastre os grupos na aba 📢 Grupos. O link vale para <b>1 pessoa só</b>.</p>
     </div>
     <div>
-      <label class="text-xs text-slate-400">Mensagem de lembrete (texto — só usada se o Nó do lembrete estiver vazio)</label>
+      <label class="text-xs text-slate-400">Mensagem de lembrete (cron 1h — enviada quando o fluxo não tem outro nó pra levar)</label>
       <textarea id="nReminder" rows="2" placeholder="Ex.: Seu Pix ainda está pendente..." class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></textarea>
     </div>
 
@@ -270,7 +256,6 @@ function go(view) {
     b.classList.toggle('text-slate-400', !on);
   });
   if (view === 'bots') loadBots();
-  if (view === 'flows') initFlows();
   if (view === 'groups') loadGroups();
   if (view === 'clients') loadClients();
   if (view === 'payments') loadPayments();
@@ -280,14 +265,19 @@ $$('.navbtn').forEach((b) => b.addEventListener('click', () => go(b.dataset.view
 /* ================= BOTS ================= */
 async function loadBots() {
   const bots = await api('/bots');
+  botsCache = bots;
   const box = $('#botsList');
   if (!bots.length) { box.innerHTML = '<p class="text-slate-500 text-sm text-center py-6">Nenhum bot ainda. Cole um token acima.</p>'; return; }
-  box.innerHTML = bots.map((b) => `
+  box.innerHTML = bots.map((b) => {
+    const flowLine = b.flow_id
+      ? `fluxo pronto (${b.flow_id})`
+      : 'sem fluxo ainda — toque em "Fluxo" para criar';
+    return `
     <div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4">
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0">
           <div class="font-semibold truncate">${esc(b.name)}</div>
-          <div class="text-[11px] text-slate-500 truncate">ID ${b.id} • criado ${fmtDate(b.created_at)}</div>
+          <div class="text-[11px] text-slate-500 truncate">ID ${b.id} • ${esc(flowLine)}</div>
           <div class="text-[11px] ${b.webhook_url ? 'text-emerald-400' : 'text-amber-400'} break-all mt-1">
             ${b.webhook_url ? '✔ webhook: ' + esc(b.webhook_url) : '⚡ sem webhook — respondendo em polling local (funciona sem URL pública)'}
           </div>
@@ -297,7 +287,9 @@ async function loadBots() {
           <button data-delbot="${b.id}" class="text-xs px-3 py-1.5 rounded-lg bg-red-900/60 border border-red-800">Excluir</button>
         </div>
       </div>
-    </div>`).join('');
+      <button data-botflow="${b.id}" class="mt-3 w-full py-2.5 rounded-xl bg-indigo-600 font-semibold active:bg-indigo-500">🔀 Abrir fluxo deste bot</button>
+    </div>`;
+  }).join('');
 
   box.querySelectorAll('[data-delbot]').forEach((el) => el.onclick = async () => {
     if (!confirm('Excluir este bot?')) return;
@@ -308,6 +300,7 @@ async function loadBots() {
     catch (e) { toast(e.message, false); }
     loadBots();
   });
+  box.querySelectorAll('[data-botflow]').forEach((el) => el.onclick = () => openBotFlow(Number(el.dataset.botflow)));
 }
 
 $('#formBot').addEventListener('submit', async (e) => {
@@ -323,62 +316,21 @@ $('#formBot').addEventListener('submit', async (e) => {
   msg.classList.remove('hidden');
 });
 
-/* ================= FLUXOS ================= */
+/* ================= FLUXO DE CADA BOT (menu filho) ================= */
 let botsCache = [];
 let groupsCache = [];
-let flowsCache = [];
-let currentFlow = null; // cópia de trabalho
+let currentFlow = null; // cópia de trabalho do fluxo do bot
+let currentBot = null;
 
-async function initFlows() {
-  botsCache = await api('/bots');
-  const sel = $('#flowBotSelect');
-  const prev = sel.value;
-  sel.innerHTML = botsCache.length
-    ? botsCache.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join('')
-    : '<option value="">— cadastre um bot primeiro —</option>';
-  if (prev) sel.value = prev;
-  loadFlowsList();
+async function openBotFlow(botId) {
+  currentBot = (botsCache || []).find((b) => b.id === botId) || { name: 'Fluxo' };
+  const f = normalize(await api('/bots/' + botId + '/flow'));
+  currentFlow = f;
+  groupsCache = await api('/groups?bot_id=' + botId).then((r) => (Array.isArray(r) ? r : [])).catch(() => []);
+  $('#flowSheetTitle').textContent = currentBot.name + ' — fluxo';
+  renderFlowSheet();
+  $('#flowSheet').classList.add('open');
 }
-$('#flowBotSelect').addEventListener('change', loadFlowsList);
-
-async function loadFlowsList() {
-  const botId = $('#flowBotSelect').value;
-  flowsCache = botId ? await api('/flows?bot_id=' + botId) : [];
-  const box = $('#flowsList');
-  if (!flowsCache.length) { box.innerHTML = '<p class="text-slate-500 text-sm text-center py-6">Nenhum fluxo. Toque em "+ Novo".</p>'; return; }
-  box.innerHTML = flowsCache.map((f) => {
-    const n = Object.keys(f.data.nodes || {}).length;
-    return `<div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
-      <div>
-        <div class="font-semibold">${esc(f.name)}</div>
-        <div class="text-[11px] text-slate-500">${n} nó(s) • id ${f.id}</div>
-      </div>
-      <div class="flex gap-2 shrink-0">
-        <button data-open="${f.id}" class="text-xs px-3 py-2 rounded-lg bg-indigo-600 font-semibold">Abrir</button>
-        <button data-delflow="${f.id}" class="text-xs px-3 py-2 rounded-lg bg-red-900/60 border border-red-800">Excluir</button>
-      </div>
-    </div>`;
-  }).join('');
-  box.querySelectorAll('[data-open]').forEach((el) => el.onclick = () => openFlow(Number(el.dataset.open)));
-  box.querySelectorAll('[data-delflow]').forEach((el) => el.onclick = async () => {
-    const id = Number(el.dataset.delflow);
-    const f = flowsCache.find((x) => x.id === id);
-    if (!confirm('Excluir o fluxo "' + (f ? f.name : id) + '"? Isso apaga todos os nós dele.')) return;
-    try {
-      await api('/flows/' + id, { method: 'DELETE' });
-      if (currentFlow && currentFlow.id === id) currentFlow = null;
-      toast('Fluxo excluído');
-    } catch (e) { toast(e.message, false); }
-    loadFlowsList();
-  });
-}
-
-$('#btnNewFlow').addEventListener('click', async () => {
-  const botId = $('#flowBotSelect').value;
-  if (!botId) return toast('Cadastre um bot primeiro', false);
-  const f = await api('/flows', { body: { bot_id: Number(botId), name: 'Fluxo ' + (flowsCache.length + 1) } });
-  await loadFlowsList(); openFlow(f.id);
-});
 
 function normalize(flow) {
   flow.data.nodes = flow.data.nodes || {};
@@ -390,25 +342,17 @@ function normalize(flow) {
       const s = typeof n.media === 'string' ? n.media.trim() : '';
       n.media = s ? [{ kind: 'url', url: s, type: n.media_type === 'video' ? 'video' : 'photo' }] : [];
     }
-    if (n.wait_node && !flow.data.inactivity_node) flow.data.inactivity_node = n.wait_node;
+    if (n.wait_node && !n.reminder_node) n.reminder_node = n.wait_node;
     delete n.wait_node;
   });
   if (flow.data.inactivity_node && !flow.data.nodes[flow.data.inactivity_node]) flow.data.inactivity_node = '';
   return flow;
 }
 
-async function openFlow(id) {
-  const f = normalize(await api('/flows/' + id));
-  currentFlow = f;
-  groupsCache = await api('/groups?bot_id=' + (f.bot_id || '')).then((r) => (Array.isArray(r) ? r : [])).catch(() => []);
-  $('#flowSheetTitle').textContent = f.name;
-  renderFlowSheet();
-  $('#flowSheet').classList.add('open');
-}
 $('#flowBack').addEventListener('click', async () => {
-  await saveFlow(false);
+  await saveFlow(true);
   $('#flowSheet').classList.remove('open');
-  loadFlowsList();
+  loadBots();
 });
 $('#flowActivate').addEventListener('click', async () => {
   await saveFlow(false);
@@ -441,13 +385,13 @@ function renderFlowSheet() {
     const wait = Number(n.wait) > 0
       ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-900 text-amber-300">⏱ ${n.wait}s</span>`
       : '';
-    const inactBadge = currentFlow.data.inactivity_node === k
-      ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-orange-900 text-orange-300">⏱ inatividade</span>'
-      : '';
     const remBadge = n.reminder_node
-      ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-900 text-fuchsia-300">⏰ 1h → ${esc(n.reminder_node)}</span>`
+      ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-900 text-fuchsia-300">↩ retorno → ${esc(n.reminder_node)}</span>`
       : '';
-    const invBadge = n.invite_group
+    const invBadge = currentFlow.data.inactivity_node === k
+      ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-orange-900 text-orange-300">🛟 beco sem saída</span>'
+      : '';
+    const inviteBadge = n.invite_group
       ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-900 text-sky-300">🎁 convite</span>'
       : '';
     const start_ = currentFlow.data.start === k ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300">INÍCIO</span>' : '';
@@ -455,7 +399,7 @@ function renderFlowSheet() {
     return `<div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4" data-node="${esc(k)}">
       <div class="flex items-center justify-between gap-2">
         <div class="font-semibold truncate">${i + 1}. ${esc(k)}</div>
-        <div class="flex gap-1 flex-wrap justify-end items-center">${start_} ${badge} ${wait} ${inactBadge} ${remBadge} ${invBadge}
+        <div class="flex gap-1 flex-wrap justify-end items-center">${start_} ${badge} ${wait} ${invBadge} ${remBadge} ${inviteBadge}
           <button data-delnode="${esc(k)}" class="text-[10px] px-2 py-0.5 rounded-full bg-red-900 text-red-300 border border-red-800">✕ excluir</button>
         </div>
       </div>
@@ -503,7 +447,7 @@ function openNode(key) {
   $('#nIsInactivity').checked = (currentFlow.data.inactivity_node || '') === key;
   updateInactivityHint();
   $('#nNext').innerHTML = nodeOptions(n.next || '');
-  $('#nReminderNode').innerHTML = nodeOptions(n.reminder_node || '', true, key, '— usar a mensagem de texto —');
+  $('#nReminderNode').innerHTML = nodeOptions(n.reminder_node || '', true, key, '— usar o próximo nó —');
   $('#nReminderNode').value = n.reminder_node || '';
   $('#nReminder').value = n.reminder || '';
   $('#nInvite').innerHTML = '<option value="">— nenhum convite —</option>' +
@@ -517,9 +461,9 @@ function openNode(key) {
 function updateInactivityHint() {
   const hint = $('#inactivityHint');
   const marked = currentFlow ? currentFlow.data.inactivity_node : '';
-  if (marked && marked === editingKey) hint.innerHTML = '✅ Este nó é o destino da inatividade do fluxo.';
-  else if (marked) hint.innerHTML = '⚠️ Hoje o destino da inatividade é o nó <b>' + esc(marked) + '</b>. Marcar aqui move o destino pra este nó (só 1 por fluxo).';
-  else hint.innerHTML = 'Quando o tempo de um nó expirar, o cliente vem pra cá. Só pode estar marcado em <b>1 nó por fluxo</b>.';
+  if (marked && marked === editingKey) hint.innerHTML = '✅ Este nó recebe o cliente quando o fluxo fica sem caminho (beco sem saída).';
+  else if (marked) hint.innerHTML = '⚠️ Hoje o beco sem saída leva pra: <b>' + esc(marked) + '</b>. Marcar aqui muda pra este nó (só 1 por fluxo).';
+  else hint.innerHTML = 'Quando o fluxo fica sem caminho (fim de linha / Pix travado), o cron de 1h traz o cliente pra cá — e daqui ele volta pro fluxo pelos botões/próximo nó. Só <b>1 por fluxo</b>.';
 }
 
 function renderButtonsEditor(buttons) {
@@ -620,11 +564,11 @@ $('#nIsInactivity').addEventListener('change', (e) => {
   if (e.target.checked) {
     const prev = currentFlow.data.inactivity_node;
     currentFlow.data.inactivity_node = editingKey;
-    if (prev && prev !== editingKey) toast('Nó da inatividade movido de "' + prev + '" para "' + editingKey + '"');
-    else toast('Nó da inatividade marcado');
+    if (prev && prev !== editingKey) toast('Beco sem saída movido de "' + prev + '" para "' + editingKey + '"');
+    else toast('Este nó passou a receber o beco sem saída');
   } else if (currentFlow.data.inactivity_node === editingKey) {
     currentFlow.data.inactivity_node = '';
-    toast('Nó da inatividade desmarcado');
+    toast('Marcação de beco sem saída removida');
   }
   updateInactivityHint();
   saveFlow(true);

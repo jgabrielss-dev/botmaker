@@ -128,9 +128,8 @@ global.fetch = async (url, opts) => {
   const data3 = {
     start: 'a',
     order: ['a', 'b', 'c'],
-    inactivity_node: 'c',
     nodes: {
-      a: { text: 'A', wait: 5, price: 0, buttons: [{ label: 'ir', to: 'b' }], next: '' },
+      a: { text: 'A', wait: 5, price: 0, buttons: [{ label: 'ir', to: 'b' }], next: '', reminder_node: 'c' },
       b: { text: 'B', wait: 0, price: 0, buttons: [], next: '' },
       c: { text: 'C', wait: 0, price: 0, buttons: [], next: '' }
     }
@@ -144,25 +143,26 @@ global.fetch = async (url, opts) => {
   db.prepare('UPDATE clients SET last_activity = ? WHERE id = ?').run(Date.now() - 60000, c3.id);
   jobs.tickInactivity();
   c3 = E.getClient(botId, 888);
-  assert.strictEqual(c3.node_key, 'c', 'inatividade deveria ir para o marcador do fluxo (c)');
-  console.log('9. inatividade leva para o NO DA INATIVIDADE do fluxo OK');
+  assert.strictEqual(c3.node_key, 'c', 'inatividade deveria ir para o NO DE RETORNO (reminder_node) "c"');
+  console.log('9. inatividade leva para o NO DE RETORNO (no de lembrete) OK');
 
-  // 9b) sem marcador no fluxo, o campo legado do no (wait_node) ainda vale
+  // 9b) sem no de retorno, o campo legado do no (wait_node) ainda vale
   const d3b = JSON.parse(flow3.data);
-  d3b.inactivity_node = '';
+  delete d3b.inactivity_node;
+  d3b.nodes.a.reminder_node = '';
   d3b.nodes.a.wait_node = 'b';
   db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(JSON.stringify(d3b), flow3.id);
   db.prepare("UPDATE clients SET node_key = 'a', last_activity = ? WHERE id = ?").run(Date.now() - 60000, c3.id);
   jobs.tickInactivity();
   c3 = E.getClient(botId, 888);
-  assert.strictEqual(c3.node_key, 'b', 'legado wait_node deveria valer sem marcador de fluxo');
+  assert.strictEqual(c3.node_key, 'b', 'legado wait_node deveria valer sem no de retorno');
   console.log('9b. campo legado wait_node continua funcionando OK');
 
   // 10) inatividade nunca volta para o proprio no
   const d3 = JSON.parse(flow3.data);
-  d3.inactivity_node = 'c';
+  delete d3.inactivity_node;
   delete d3.nodes.a.wait_node;
-  d3.nodes.c = { text: 'C', wait: 5, price: 0, buttons: [], next: '', wait_node: 'c' };
+  d3.nodes.c = { text: 'C', wait: 5, price: 0, buttons: [], next: '', reminder_node: 'c' };
   db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(JSON.stringify(d3), flow3.id);
   db.prepare("UPDATE clients SET node_key = 'c', last_activity = ? WHERE id = ?").run(Date.now() - 60000, c3.id);
   jobs.tickInactivity();
@@ -170,13 +170,14 @@ global.fetch = async (url, opts) => {
   assert.strictEqual(c3.node_key, 'c', 'nao deveria voltar para o proprio no');
   console.log('10. inatividade ignora self-loop OK');
 
-  // 11) cron de 1h leva para o NO DO LEMBRETE quando nao ha caminho
+  // 11) cron de 1h leva para o NO DA INATIVIDADE do fluxo quando nao ha caminho
   db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(
     JSON.stringify({
       start: 'presa',
       order: ['presa', 'resgate'],
+      inactivity_node: 'resgate',
       nodes: {
-        presa: { text: 'Sem caminho', wait: 0, price: 0, buttons: [], next: '', reminder: 'texto antigo', reminder_node: 'resgate' },
+        presa: { text: 'Sem caminho', wait: 0, price: 0, buttons: [], next: '', reminder: 'texto antigo' },
         resgate: { text: 'Voltou! Use os botoes', wait: 0, price: 0, buttons: [{ label: 'continuar', to: 'presa' }], next: '' }
       }
     }),
@@ -185,21 +186,21 @@ global.fetch = async (url, opts) => {
   db.prepare("UPDATE clients SET status = 'active', node_key = 'presa', last_reminder = 0, payment_id = NULL WHERE id = ?").run(c3.id);
   jobs.tickReminders();
   c3 = E.getClient(botId, 888);
-  assert.strictEqual(c3.node_key, 'resgate', 'cron deveria levar para o no do lembrete e nao enviar o texto do no');
+  assert.strictEqual(c3.node_key, 'resgate', 'cron deveria levar para o no da inatividade do fluxo');
   const remMsg11 = calls.filter((x) => x.url.includes('sendMessage')).map((x) => JSON.parse(x.body).text);
-  assert.ok(!remMsg11.includes('texto antigo'), 'nao deveria usar o texto de lembrete quando ha no de lembrete');
-  console.log('11. cron de 1h leva para o NO DO LEMBRETE OK');
+  assert.ok(!remMsg11.includes('texto antigo'), 'nao deveria usar o texto de lembrete quando ha no da inatividade');
+  console.log('11. cron de 1h leva para o NO DA INATIVIDADE (beco sem saida) OK');
 
-  // 12) no com caminho de inatividade NAO e fim de linha (cron nao dispara)
+  // 12) no com caminho de retorno (inatividade) NAO e beco sem saida (cron nao dispara)
   const d12 = JSON.parse(db.prepare('SELECT data FROM flows WHERE id = ?').get(flow3.id).data);
-  d12.nodes.presa = { text: 'Sem caminho', wait: 30, price: 0, buttons: [], next: '', wait_node: 'resgate', reminder_node: 'resgate' };
+  d12.nodes.presa = { text: 'Sem caminho', wait: 30, price: 0, buttons: [], next: '', reminder_node: 'resgate' };
   db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(JSON.stringify(d12), flow3.id);
   db.prepare("UPDATE clients SET node_key = 'presa', last_reminder = 0 WHERE id = ?").run(c3.id);
   jobs.tickReminders();
   c3 = E.getClient(botId, 888);
-  assert.strictEqual(c3.node_key, 'presa', 'no com saida por inatividade nao e fim de linha');
+  assert.strictEqual(c3.node_key, 'presa', 'no com saida de retorno nao e fim de linha');
   assert.strictEqual(c3.last_reminder, 0, 'cron nao deveria disparar quando ha caminho');
-  console.log('12. inatividade conta como caminho OK');
+  console.log('12. caminho de retorno conta como caminho OK');
 
   // 13) so roda polling em bot sem webhook
   const poll = require('../server/poll');
