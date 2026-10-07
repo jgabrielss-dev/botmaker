@@ -11,8 +11,9 @@
   body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   .view{display:none}.view.active{display:block}
   input,textarea,select{font-size:16px}
-  .sheet{position:fixed;inset:0;z-index:50;display:none}
-  .sheet.open{display:block}
+.sheet{position:fixed;inset:0;z-index:50;display:none}
+.sheet.open{display:block}
+#nodeSheet{z-index:60}
   .fade{animation:f .18s ease-out}
   @keyframes f{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
   .card:active{transform:scale(.99)}
@@ -320,10 +321,24 @@ async function loadFlowsList() {
         <div class="font-semibold">${esc(f.name)}</div>
         <div class="text-[11px] text-slate-500">${n} nó(s) • id ${f.id}</div>
       </div>
-      <button data-open="${f.id}" class="text-xs px-3 py-2 rounded-lg bg-indigo-600 font-semibold">Abrir</button>
+      <div class="flex gap-2 shrink-0">
+        <button data-open="${f.id}" class="text-xs px-3 py-2 rounded-lg bg-indigo-600 font-semibold">Abrir</button>
+        <button data-delflow="${f.id}" class="text-xs px-3 py-2 rounded-lg bg-red-900/60 border border-red-800">Excluir</button>
+      </div>
     </div>`;
   }).join('');
   box.querySelectorAll('[data-open]').forEach((el) => el.onclick = () => openFlow(Number(el.dataset.open)));
+  box.querySelectorAll('[data-delflow]').forEach((el) => el.onclick = async () => {
+    const id = Number(el.dataset.delflow);
+    const f = flowsCache.find((x) => x.id === id);
+    if (!confirm('Excluir o fluxo "' + (f ? f.name : id) + '"? Isso apaga todos os nós dele.')) return;
+    try {
+      await api('/flows/' + id, { method: 'DELETE' });
+      if (currentFlow && currentFlow.id === id) currentFlow = null;
+      toast('Fluxo excluído');
+    } catch (e) { toast(e.message, false); }
+    loadFlowsList();
+  });
 }
 
 $('#btnNewFlow').addEventListener('click', async () => {
@@ -387,7 +402,9 @@ function renderFlowSheet() {
     return `<div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4" data-node="${esc(k)}">
       <div class="flex items-center justify-between gap-2">
         <div class="font-semibold truncate">${i + 1}. ${esc(k)}</div>
-        <div class="flex gap-1 flex-wrap justify-end">${start_} ${badge} ${wait}</div>
+        <div class="flex gap-1 flex-wrap justify-end items-center">${start_} ${badge} ${wait}
+          <button data-delnode="${esc(k)}" class="text-[10px] px-2 py-0.5 rounded-full bg-red-900 text-red-300 border border-red-800">✕ excluir</button>
+        </div>
       </div>
       <p class="text-xs text-slate-400 mt-1 line-clamp-2">${esc((n.text || '').slice(0, 120)) || '(sem texto)'}</p>
       ${btns ? `<p class="text-[11px] text-slate-500 mt-1">${btns}</p>` : ''}
@@ -395,6 +412,10 @@ function renderFlowSheet() {
     </div>`;
   }).join('');
   box.querySelectorAll('[data-node]').forEach((el) => el.onclick = () => openNode(el.dataset.node));
+  box.querySelectorAll('[data-delnode]').forEach((el) => el.onclick = (ev) => {
+    ev.stopPropagation();
+    deleteNode(el.dataset.delnode);
+  });
 }
 
 async function saveFlow(silent) {
@@ -457,18 +478,22 @@ $('#btnAddButton').addEventListener('click', () => {
 
 $('#nodeBack').addEventListener('click', () => $('#nodeSheet').classList.remove('open'));
 
-$('#nodeDelete').addEventListener('click', () => {
-  if (!confirm('Excluir o nó "' + editingKey + '"?')) return;
-  delete currentFlow.data.nodes[editingKey];
-  currentFlow.data.order = currentFlow.data.order.filter((k) => k !== editingKey);
+function deleteNode(key) {
+  if (!currentFlow || !currentFlow.data.nodes[key]) return;
+  if (!confirm('Excluir o nó "' + key + '"?')) return;
+  delete currentFlow.data.nodes[key];
+  currentFlow.data.order = currentFlow.data.order.filter((k) => k !== key);
   Object.values(currentFlow.data.nodes).forEach((n) => {
-    (n.buttons || []).forEach((b) => { if (b.to === editingKey) b.to = ''; });
-    if (n.next === editingKey) n.next = '';
+    (n.buttons || []).forEach((b) => { if (b.to === key) b.to = ''; });
+    if (n.next === key) n.next = '';
   });
-  if (currentFlow.data.start === editingKey) currentFlow.data.start = currentFlow.data.order[0] || '';
+  if (currentFlow.data.start === key) currentFlow.data.start = currentFlow.data.order[0] || '';
+  if (editingKey === key) editingKey = null;
   $('#nodeSheet').classList.remove('open');
   renderFlowSheet(); saveFlow(true);
-});
+}
+
+$('#nodeDelete').addEventListener('click', () => deleteNode(editingKey));
 
 $('#nodeSave').addEventListener('click', () => {
   const oldKey = editingKey;
