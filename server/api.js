@@ -1,5 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const db = require('./db');
 const auth = require('./auth');
 const tg = require('./telegram');
@@ -215,6 +217,82 @@ router.get('/payments', (req, res) => {
     )
     .all();
   res.json(rows);
+});
+
+/* ---------- Grupos (convites de uso unico) ---------- */
+router.get('/groups', (req, res) => {
+  const botId = req.query.bot_id ? Number(req.query.bot_id) : null;
+  const rows = botId
+    ? db.prepare('SELECT * FROM groups WHERE bot_id = ? ORDER BY id DESC').all(botId)
+    : db.prepare('SELECT * FROM groups ORDER BY id DESC').all();
+  res.json(rows);
+});
+
+router.post('/groups', async (req, res) => {
+  const botId = Number(req.body && req.body.bot_id);
+  const bot = E.getBot(botId);
+  if (!bot) return res.status(400).json({ error: 'Bot inválido' });
+  const chatId = String((req.body && req.body.chat_id) || '').trim();
+  if (!chatId) return res.status(400).json({ error: 'Informe o ID (-100...) ou @usuario do grupo' });
+
+  try {
+    const me = await tg.getMe(bot.token);
+    const chat = await tg.getChat(bot.token, chatId);
+    if (!chat || (chat.type !== 'group' && chat.type !== 'supergroup'))
+      return res.status(400).json({ error: 'Esse chat não é um grupo/supergupo' });
+    const member = await tg.getChatMember(bot.token, chatId, me.id);
+    if (member.status !== 'administrator' && member.status !== 'creator')
+      return res.status(400).json({ error: 'O bot não é administrador desse grupo' });
+    if (member.can_invite_users === false)
+      return res.status(400).json({ error: 'O bot não tem permissão de "Adicionar novos membros" nas administrações do grupo' });
+
+    const title = String(chat.title || chat.username || chatId).slice(0, 80);
+    const info = db
+      .prepare('INSERT INTO groups (bot_id, chat_id, title, created_at) VALUES (?,?,?,?)')
+      .run(botId, chatId, title, Date.now());
+    res.json(db.prepare('SELECT * FROM groups WHERE id = ?').get(info.lastInsertRowid));
+  } catch (e) {
+    res.status(400).json({ error: 'Telegram recusou: ' + e.message });
+  }
+});
+
+router.delete('/groups/:id', (req, res) => {
+  const info = db.prepare('DELETE FROM groups WHERE id = ?').run(Number(req.params.id));
+  res.json({ ok: true, removed: info.changes });
+});
+
+/* ---------- Upload de midia local (arquivo do aparelho) ---------- */
+const MIME_EXT = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'video/mp4': '.mp4',
+  'video/webm': '.webm',
+  'video/quicktime': '.mov',
+  'application/pdf': '.pdf',
+  'audio/mpeg': '.mp3',
+  'audio/ogg': '.ogg'
+};
+
+router.post('/uploads', express.raw({ type: () => true, limit: '40mb' }), (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  if (!buf || !buf.length) return res.status(400).json({ error: 'Arquivo vazio' });
+  const mime = String(req.headers['content-type'] || '').split(';')[0].toLowerCase();
+  const ext = MIME_EXT[mime];
+  // extensao vem SEMPRE do mime (nunca do nome do arquivo) para nao servir html
+  if (!ext) return res.status(400).json({ error: 'Formato não suportado: ' + (mime || 'desconhecido') });
+
+  const type = mime.startsWith('image/') ? 'photo' : mime.startsWith('video/') ? 'video' : 'document';
+  const file = crypto.randomBytes(12).toString('hex') + ext;
+  const dir = path.join(db.DATA_DIR, 'uploads');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, file), buf);
+  } catch (e) {
+    return res.status(500).json({ error: 'Falha ao gravar: ' + e.message });
+  }
+  res.json({ ok: true, file, name: String(req.query.name || file).slice(-80), mime, type, size: buf.length });
 });
 
 module.exports = router;

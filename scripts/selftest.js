@@ -5,6 +5,8 @@ process.env.BASE_URL = 'https://exemplo.up.railway.app';
 process.env.ADMIN_PASSWORD = 'teste123';
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const db = require('../server/db');
 const E = require('../server/engine');
 const jobs = require('../server/jobs');
@@ -15,7 +17,9 @@ const json = (o) => ({ ok: true, status: 200, json: async () => o });
 
 global.fetch = async (url, opts) => {
   const u = String(url);
-  calls.push({ url: u, body: opts && opts.body });
+  const isForm = opts && opts.body && typeof opts.body === 'object' && !Array.isArray(opts.body);
+  calls.push({ url: u, body: opts && opts.body, isForm });
+  if (u.includes('createChatInviteLink')) return json({ ok: true, result: { invite_link: 'https://t.me/+GRUPO-UNICO' } });
   if (u.includes('api.telegram.org')) return json({ ok: true, result: { message_id: 1 } });
   if (u.includes('meradopago') || u.includes('mercadopago.com/v1/payments/999')) {
     return json({ id: 999, status: mpStatus, transaction_amount: 10.5 });
@@ -120,12 +124,13 @@ global.fetch = async (url, opts) => {
   assert.ok(auth.login('admin'), 'padrao admin deveria valer sem a variavel');
   console.log('8. normalizacao de senha OK');
 
-  // 9) inatividade usa o campo proprio "no da inatividade"
+  // 9) inatividade usa o marcador do FLUXO (toggle "este e o no da inatividade")
   const data3 = {
     start: 'a',
     order: ['a', 'b', 'c'],
+    inactivity_node: 'c',
     nodes: {
-      a: { text: 'A', wait: 5, price: 0, buttons: [{ label: 'ir', to: 'b' }], next: '', wait_node: 'c' },
+      a: { text: 'A', wait: 5, price: 0, buttons: [{ label: 'ir', to: 'b' }], next: '' },
       b: { text: 'B', wait: 0, price: 0, buttons: [], next: '' },
       c: { text: 'C', wait: 0, price: 0, buttons: [], next: '' }
     }
@@ -139,14 +144,27 @@ global.fetch = async (url, opts) => {
   db.prepare('UPDATE clients SET last_activity = ? WHERE id = ?').run(Date.now() - 60000, c3.id);
   jobs.tickInactivity();
   c3 = E.getClient(botId, 888);
-  assert.strictEqual(c3.node_key, 'c', 'inatividade deveria ir para o no "c" (campo proprio) e nao para "b"');
-  console.log('9. inatividade leva para o NO DA INATIVIDADE OK');
+  assert.strictEqual(c3.node_key, 'c', 'inatividade deveria ir para o marcador do fluxo (c)');
+  console.log('9. inatividade leva para o NO DA INATIVIDADE do fluxo OK');
+
+  // 9b) sem marcador no fluxo, o campo legado do no (wait_node) ainda vale
+  const d3b = JSON.parse(flow3.data);
+  d3b.inactivity_node = '';
+  d3b.nodes.a.wait_node = 'b';
+  db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(JSON.stringify(d3b), flow3.id);
+  db.prepare("UPDATE clients SET node_key = 'a', last_activity = ? WHERE id = ?").run(Date.now() - 60000, c3.id);
+  jobs.tickInactivity();
+  c3 = E.getClient(botId, 888);
+  assert.strictEqual(c3.node_key, 'b', 'legado wait_node deveria valer sem marcador de fluxo');
+  console.log('9b. campo legado wait_node continua funcionando OK');
 
   // 10) inatividade nunca volta para o proprio no
   const d3 = JSON.parse(flow3.data);
+  d3.inactivity_node = 'c';
+  delete d3.nodes.a.wait_node;
   d3.nodes.c = { text: 'C', wait: 5, price: 0, buttons: [], next: '', wait_node: 'c' };
   db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(JSON.stringify(d3), flow3.id);
-  db.prepare('UPDATE clients SET last_activity = ? WHERE id = ?').run(Date.now() - 60000, c3.id);
+  db.prepare("UPDATE clients SET node_key = 'c', last_activity = ? WHERE id = ?").run(Date.now() - 60000, c3.id);
   jobs.tickInactivity();
   c3 = E.getClient(botId, 888);
   assert.strictEqual(c3.node_key, 'c', 'nao deveria voltar para o proprio no');
@@ -188,6 +206,96 @@ global.fetch = async (url, opts) => {
   assert.strictEqual(poll.pollable({ webhook_url: '' }), true, 'bot sem webhook deve usar polling');
   assert.strictEqual(poll.pollable({ webhook_url: 'https://x/tg/1' }), false, 'bot com webhook nao deve usar polling');
   console.log('13. polling local somente sem webhook OK');
+
+  // 14) no com VÁRIAS midias por URL: legenda no primeiro item, tipos corretos
+  const data4 = {
+    start: 'mm',
+    order: ['mm', 'fim2'],
+    nodes: {
+      mm: {
+        text: 'Mídia múltipla!',
+        price: 0, wait: 0, next: '',
+        buttons: [{ label: 'ok', to: 'fim2' }],
+        media: [
+          { kind: 'url', url: 'https://x/1.jpg', type: 'photo' },
+          { kind: 'url', url: 'https://x/2.mp4', type: 'video' }
+        ]
+      },
+      fim2: { text: 'fim', price: 0, wait: 0, buttons: [], next: '' }
+    }
+  };
+  db.prepare('INSERT INTO flows (bot_id, name, data, created_at) VALUES (?,?,?,?)').run(botId, 'Fluxo 4', JSON.stringify(data4), Date.now());
+  const flow4 = db.prepare('SELECT * FROM flows WHERE bot_id = ? ORDER BY id DESC').get(botId);
+  db.prepare('UPDATE bots SET flow_id = ? WHERE id = ?').run(flow4.id, botId);
+  const botE = E.getBot(botId);
+  const callsBefore14 = calls.length;
+  await E.handleUpdate(botE, { message: { chat: { id: 1000 }, text: '/start' } });
+  const mm = calls.slice(callsBefore14).filter((x) => x.url.includes('sendPhoto') || x.url.includes('sendVideo'));
+  assert.ok(mm.some((x) => x.url.includes('sendPhoto')), 'deveria ter enviado sendPhoto');
+  assert.ok(mm.some((x) => x.url.includes('sendVideo')), 'deveria ter enviado sendVideo');
+  let ph = mm.find((x) => x.url.includes('sendPhoto'));
+  let vd = mm.find((x) => x.url.includes('sendVideo'));
+  assert.ok(JSON.parse(ph.body).photo === 'https://x/1.jpg', 'primeira midia eh a foto');
+  assert.strictEqual(JSON.parse(ph.body).caption, 'Mídia múltipla!', 'legenda no PRIMEIRO item');
+  assert.ok(JSON.parse(ph.body).reply_markup, 'botoes acompanham a primeira midia');
+  assert.strictEqual(JSON.parse(vd.body).video, 'https://x/2.mp4', 'segunda midia eh o video');
+  assert.strictEqual(JSON.parse(vd.body).caption, undefined, 'sem legenda nos itens seguintes');
+  console.log('14. midia multipla por URL (legenda no primeiro item) OK');
+
+  // 15) no com ARQUIVO LOCAL: upload multipart ao Telegram
+  const upDir = path.join(process.env.DATA_DIR, 'uploads');
+  fs.mkdirSync(upDir, { recursive: true });
+  fs.writeFileSync(path.join(upDir, 'foto-teste.jpg'), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]));
+  const data5 = {
+    start: 'ap',
+    order: ['ap', 'fim3'],
+    nodes: {
+      ap: {
+        text: 'Olha o arquivo',
+        price: 0, wait: 0, next: '',
+        buttons: [],
+        media: [{ kind: 'file', file: 'foto-teste.jpg', name: 'foto.jpg', type: 'photo' }]
+      },
+      fim3: { text: 'fim', price: 0, wait: 0, buttons: [], next: '' }
+    }
+  };
+  db.prepare('INSERT INTO flows (bot_id, name, data, created_at) VALUES (?,?,?,?)').run(botId, 'Fluxo 5', JSON.stringify(data5), Date.now());
+  const flow5 = db.prepare('SELECT * FROM flows WHERE bot_id = ? ORDER BY id DESC').get(botId);
+  db.prepare('UPDATE bots SET flow_id = ? WHERE id = ?').run(flow5.id, botId);
+  const callsBefore15 = calls.length;
+  await E.handleUpdate(E.getBot(botId), { message: { chat: { id: 1001 }, text: '/start' } });
+  const f5 = calls.slice(callsBefore15).find((x) => x.url.includes('sendPhoto') && x.isForm);
+  assert.ok(f5, 'arquivo local deveria ser enviado como multipart (FormData)');
+  console.log('15. midia por arquivo local (multipart) OK');
+
+  // 16) convite de uso unico enviado apos o conteudo do no
+  const gid = Number(db.prepare('INSERT INTO groups (bot_id, chat_id, title, created_at) VALUES (?,?,?,?)').run(botId, '-1001234567', 'Grupo VIP', Date.now()).lastInsertRowid);
+  const data6 = {
+    start: 'conv',
+    order: ['conv', 'fim4'],
+    nodes: {
+      conv: { text: 'Bem-vindo ao grupo VIP!', price: 0, wait: 0, next: '', buttons: [], media: [], invite_group: gid },
+      fim4: { text: 'fim', price: 0, wait: 0, buttons: [], next: '' }
+    }
+  };
+  db.prepare('INSERT INTO flows (bot_id, name, data, created_at) VALUES (?,?,?,?)').run(botId, 'Fluxo 6', JSON.stringify(data6), Date.now());
+  const flow6 = db.prepare('SELECT * FROM flows WHERE bot_id = ? ORDER BY id DESC').get(botId);
+  db.prepare('UPDATE bots SET flow_id = ? WHERE id = ?').run(flow6.id, botId);
+  const callsBefore16 = calls.length;
+  await E.handleUpdate(E.getBot(botId), { message: { chat: { id: 1002 }, text: '/start' } });
+  const inv = calls.slice(callsBefore16).find((x) => x.url.includes('createChatInviteLink'));
+  assert.ok(inv, 'deveria ter criado o convite');
+  const invBody = JSON.parse(inv.body);
+  assert.strictEqual(invBody.chat_id, '-1001234567', 'convite para o grupo cadastrado');
+  assert.strictEqual(invBody.member_limit, 1, 'convite de uso unico (member_limit=1)');
+  const invMsg = calls.slice(callsBefore16).filter((x) => x.url.includes('sendMessage')).map((x) => JSON.parse(x.body).text).join('|');
+  assert.ok(invMsg.includes('https://t.me/+GRUPO-UNICO'), 'mensagem com o link do convite: ' + invMsg);
+  const idMsg = calls.slice(callsBefore16).filter((x) => x.url.includes('sendMessage') && JSON.parse(x.body).text.includes('GRUPO-UNICO'));
+  assert.ok(idMsg.length === 1, 'convite enviado uma unica vez');
+  const orderOk = calls.slice(callsBefore16).findIndex((x) => x.url.includes('sendMessage') && JSON.parse(x.body).text.includes('Bem-vindo'));
+  const invIndex = calls.slice(callsBefore16).findIndex((x) => x.url.includes('sendMessage') && JSON.parse(x.body).text.includes('GRUPO-UNICO'));
+  assert.ok(orderOk >= 0 && invIndex > orderOk, 'conteudo do no antes do convite');
+  console.log('16. convite de uso unico enviado depois do conteudo OK');
 
   console.log('\nTODOS OS TESTES PASSARAM');
   process.exit(0);

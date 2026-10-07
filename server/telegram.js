@@ -1,4 +1,7 @@
 const API = 'https://api.telegram.org';
+const fs = require('fs');
+const path = require('path');
+const db = require('./db');
 
 async function call(method, payload, token) {
   const res = await fetch(`${API}/bot${token}/${method}`, {
@@ -43,37 +46,131 @@ async function sendText(token, chatId, text, reply_markup, opts = {}) {
   }
 }
 
-async function sendMedia(token, chatId, node) {
-  const media = (node.media || '').trim();
-  const reply_markup = keyboardFor(node);
-  const text = node.text || '';
-  const isVideo = node.media_type === 'video' || /\.(mp4|webm|mov|mkv)(\?|$)/i.test(media);
-  const method = isVideo ? 'sendVideo' : 'sendPhoto';
-  const field = isVideo ? 'video' : 'photo';
+/* ---------------- Midias (varias URLs e/ou arquivos locais) ---------------- */
 
-  const payload = {
-    chat_id: chatId,
-    [field]: media,
-    caption: text || undefined,
-    reply_markup
-  };
+function mediaItems(node) {
+  const m = node.media;
+  if (Array.isArray(m)) {
+    return m
+      .filter((x) => x && (x.url || x.file))
+      .map((x) => ({
+        kind: x.file ? 'file' : 'url',
+        url: x.url || '',
+        file: x.file || '',
+        name: x.name || '',
+        type: x.type === 'video' ? 'video' : x.type === 'document' ? 'document' : 'photo'
+      }));
+  }
+  const s = typeof m === 'string' ? m.trim() : '';
+  if (!s) return [];
+  return [{ kind: 'url', url: s, name: '', type: node.media_type === 'video' ? 'video' : 'photo' }];
+}
+
+function pickMethod(type, ref) {
+  if (type === 'document') return { method: 'sendDocument', field: 'document' };
+  if (type === 'video' || /\.(mp4|webm|mov|mkv)(\?|$)/i.test(ref || '')) return { method: 'sendVideo', field: 'video' };
+  return { method: 'sendPhoto', field: 'photo' };
+}
+
+function isParseError(e) {
+  return /parse|Entities|unsupported/i.test((e && (e.description || e.message)) || '');
+}
+
+async function sendUrlItem(token, chatId, item, caption, reply_markup) {
+  const { method, field } = pickMethod(item.type, item.url);
+  const base = { chat_id: chatId, [field]: item.url, reply_markup };
+  const payload = caption ? { ...base, caption, parse_mode: 'HTML' } : base;
   try {
-    return await call(method, { ...payload, parse_mode: 'HTML' }, token);
+    return await call(method, payload, token);
   } catch (e) {
-    if (/parse|Entities|unsupported/i.test(e.description || '')) {
+    if (caption && isParseError(e)) {
       const { parse_mode, ...rest } = payload;
       return await call(method, rest, token);
     }
-    // fallback: envia a midia sem legenda e o texto em seguida
-    await call(method, { chat_id: chatId, [field]: media, reply_markup }, token);
-    if (text) await sendText(token, chatId, text, reply_markup);
+    throw e;
   }
 }
 
+async function sendFileItem(token, chatId, item, caption, reply_markup) {
+  const buf = fs.readFileSync(path.join(db.DATA_DIR, 'uploads', item.file));
+  const { method, field } = pickMethod(item.type, item.name || item.file);
+  const mime = item.type === 'video' ? 'video/mp4' : item.type === 'document' ? 'application/pdf' : 'image/jpeg';
+  const ext = path.extname(item.file) || '.bin';
+  const rawName = String(item.name || '').replace(/[^\w.\- ]+/g, '_').trim();
+  const fileName = (rawName || 'arquivo') + (rawName.includes('.') ? '' : ext);
+
+  const build = (withCaption) => {
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append(field, new Blob([buf], { type: mime }), fileName);
+    if (withCaption && caption) form.append('caption', caption);
+    if (withCaption && caption) form.append('parse_mode', 'HTML');
+    if (reply_markup) form.append('reply_markup', JSON.stringify(reply_markup));
+    return form;
+  };
+
+  const post = async (form) => {
+    const res = await fetch(`${API}/bot${token}/${method}`, { method: 'POST', body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!data.ok) {
+      const err = new Error(`telegram ${method}: ${data.description || res.status}`);
+      err.description = data.description || '';
+      throw err;
+    }
+    return data.result;
+  };
+
+  try {
+    return await post(build(true));
+  } catch (e) {
+    if (caption && isParseError(e)) return await post(build(false));
+    throw e;
+  }
+}
+
+async function sendItem(token, chatId, item, caption, reply_markup) {
+  if (item.kind === 'file') return sendFileItem(token, chatId, item, caption, reply_markup);
+  return sendUrlItem(token, chatId, item, caption, reply_markup);
+}
+
 async function sendNode(token, chatId, node) {
-  const media = (node.media || '').trim();
-  if (media) return sendMedia(token, chatId, node);
-  return sendText(token, chatId, node.text || '', keyboardFor(node));
+  const items = mediaItems(node);
+  const text = node.text || '';
+  const reply_markup = keyboardFor(node);
+  if (!items.length) return sendText(token, chatId, text, reply_markup);
+
+  let textSent = false;
+  let sentAny = false;
+  let lastErr = null;
+
+  for (let i = 0; i < items.length; i++) {
+    const caption = i === 0 && text && !textSent ? text : '';
+    const markup = i === 0 ? reply_markup : undefined;
+    try {
+      await sendItem(token, chatId, items[i], caption, markup);
+      sentAny = true;
+      if (caption) textSent = true;
+    } catch (e) {
+      lastErr = e;
+      // fallback: envia a midia sem legenda e o texto em seguida
+      try {
+        await sendItem(token, chatId, items[i], '', undefined);
+        sentAny = true;
+        if (caption) {
+          await sendText(token, chatId, text, reply_markup);
+          textSent = true;
+        }
+      } catch (e2) {
+        lastErr = e2;
+      }
+    }
+  }
+
+  if (!sentAny) {
+    if (text) return sendText(token, chatId, text, reply_markup);
+    throw lastErr || new Error('sendNode: nenhuma midia enviada');
+  }
+  return { sent: true };
 }
 
 async function sendPixMessage(bot, chatId, payment, node) {
@@ -129,4 +226,35 @@ async function getMe(token) {
   return call('getMe', {}, token);
 }
 
-module.exports = { call, sendNode, sendText, sendPixMessage, setWebhook, deleteWebhook, getMe, keyboardFor };
+async function getChat(token, chatId) {
+  return call('getChat', { chat_id: chatId }, token);
+}
+
+async function getChatMember(token, chatId, userId) {
+  return call('getChatMember', { chat_id: chatId, user_id: userId }, token);
+}
+
+/* Convite de uso unico: member_limit = 1 (uma pessoa so) */
+async function createOneTimeInvite(token, chatId, name) {
+  const res = await call(
+    'createChatInviteLink',
+    { chat_id: chatId, member_limit: 1, name: name || undefined },
+    token
+  );
+  return res.invite_link;
+}
+
+module.exports = {
+  call,
+  sendNode,
+  sendText,
+  sendPixMessage,
+  setWebhook,
+  deleteWebhook,
+  getMe,
+  getChat,
+  getChatMember,
+  createOneTimeInvite,
+  keyboardFor,
+  mediaItems
+};

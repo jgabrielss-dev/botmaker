@@ -92,11 +92,25 @@
       <div id="paymentsList" class="space-y-2"></div>
     </section>
 
+    <!-- ===== GRUPOS ===== -->
+    <section id="view-groups" class="view">
+      <h2 class="font-bold text-lg mb-3">Grupos (convites de uso único)</h2>
+      <form id="formGroup" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 mb-5">
+        <select id="groupBotSelect" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700"></select>
+        <input id="groupChatId" placeholder="ID do grupo (-1001234567890) ou @usuario" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 outline-none focus:border-indigo-500" />
+        <button class="w-full py-2.5 rounded-xl bg-indigo-600 font-semibold active:bg-indigo-500">+ Adicionar grupo</button>
+        <p id="groupMsg" class="text-xs hidden"></p>
+      </form>
+      <p class="text-xs text-slate-500 mb-3">O bot precisa ser <b>administrador</b> do grupo com permissão de adicionar membros. O convite gerado no fluxo vale para <b>1 pessoa só</b>.</p>
+      <div id="groupsList" class="space-y-3"></div>
+    </section>
+
   </main>
 
-  <nav class="fixed bottom-0 inset-x-0 z-30 bg-slate-900 border-t border-slate-800 grid grid-cols-4 text-[11px]">
+  <nav class="fixed bottom-0 inset-x-0 z-30 bg-slate-900 border-t border-slate-800 grid grid-cols-5 text-[11px]">
     <button data-view="bots" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">🤖</span>Bots</button>
     <button data-view="flows" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">🔀</span>Fluxos</button>
+    <button data-view="groups" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">📢</span>Grupos</button>
     <button data-view="clients" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">👥</span>Clientes</button>
     <button data-view="payments" class="navbtn py-2.5 flex flex-col items-center gap-0.5"><span class="text-lg">💰</span>Pix</button>
   </nav>
@@ -118,17 +132,17 @@
       <label class="text-xs text-slate-400">Mensagem (texto — aceita HTML simples: &lt;b&gt;, &lt;i&gt;, &lt;code&gt;)</label>
       <textarea id="nText" rows="5" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 outline-none focus:border-indigo-500"></textarea>
     </div>
-    <div class="grid grid-cols-2 gap-3">
-      <div>
-        <label class="text-xs text-slate-400">URL de mídia (foto/vídeo)</label>
-        <input id="nMedia" placeholder="https://..." class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700" />
+    <div>
+      <div class="flex items-center justify-between mb-2 gap-2">
+        <label class="text-xs text-slate-400">Mídias (várias URLs e/ou arquivos do aparelho)</label>
+        <button type="button" id="btnPickFiles" class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 font-semibold shrink-0">📎 Anexar</button>
       </div>
-      <div>
-        <label class="text-xs text-slate-400">Tipo</label>
-        <select id="nMediaType" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700">
-          <option value="photo">Foto</option><option value="video">Vídeo</option>
-        </select>
+      <div class="flex gap-2 mb-2">
+        <input id="newMediaUrl" placeholder="https://.../foto.jpg" class="flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 outline-none focus:border-indigo-500" />
+        <button type="button" id="btnAddUrl" class="text-xs px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 shrink-0">+ URL</button>
       </div>
+      <input id="nFiles" type="file" multiple accept="image/*,video/*,application/pdf,audio/*" class="hidden" />
+      <div id="mediaList" class="space-y-2"></div>
     </div>
     <div class="grid grid-cols-2 gap-3">
       <div>
@@ -140,10 +154,13 @@
         <input id="nPrice" type="number" min="0" step="0.01" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700" />
       </div>
     </div>
-    <div>
-      <label class="text-xs text-slate-400">Nó da inatividade (outro nó • vazio = usar o próximo nó)</label>
-      <select id="nWaitNode" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
-    </div>
+    <label class="flex items-start gap-3 bg-slate-900 border border-slate-800 rounded-xl p-3 cursor-pointer">
+      <input type="checkbox" id="nIsInactivity" class="mt-1 w-5 h-5 accent-indigo-500 shrink-0" />
+      <span>
+        <span class="text-sm font-semibold block">Este é o nó da inatividade</span>
+        <span id="inactivityHint" class="text-[11px] text-slate-400">Quando o tempo de um nó expirar, o cliente vem pra cá. Só pode estar marcado em <b>1 nó por fluxo</b>.</span>
+      </span>
+    </label>
     <div>
       <label class="text-xs text-slate-400">Próximo nó (sem botão / após pagamento aprovado)</label>
       <select id="nNext" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
@@ -151,6 +168,11 @@
     <div>
       <label class="text-xs text-slate-400">Nó do lembrete (cron 1h) — leva o cliente pra cá SEMPRE que não houver caminho</label>
       <select id="nReminderNode" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Convite de uso único (grupo) — enviado DEPOIS da mensagem deste nó</label>
+      <select id="nInvite" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
+      <p class="text-[11px] text-slate-500 mt-1">Cadastre os grupos na aba 📢 Grupos. O link vale para <b>1 pessoa só</b>.</p>
     </div>
     <div>
       <label class="text-xs text-slate-400">Mensagem de lembrete (texto — só usada se o Nó do lembrete estiver vazio)</label>
@@ -249,6 +271,7 @@ function go(view) {
   });
   if (view === 'bots') loadBots();
   if (view === 'flows') initFlows();
+  if (view === 'groups') loadGroups();
   if (view === 'clients') loadClients();
   if (view === 'payments') loadPayments();
 }
@@ -302,6 +325,7 @@ $('#formBot').addEventListener('submit', async (e) => {
 
 /* ================= FLUXOS ================= */
 let botsCache = [];
+let groupsCache = [];
 let flowsCache = [];
 let currentFlow = null; // cópia de trabalho
 
@@ -361,12 +385,22 @@ function normalize(flow) {
   flow.data.order = (flow.data.order || []).filter((k) => flow.data.nodes[k]);
   Object.keys(flow.data.nodes).forEach((k) => { if (!flow.data.order.includes(k)) flow.data.order.push(k); });
   if (!flow.data.nodes[flow.data.start]) flow.data.start = flow.data.order[0] || '';
+  Object.values(flow.data.nodes).forEach((n) => {
+    if (!Array.isArray(n.media)) {
+      const s = typeof n.media === 'string' ? n.media.trim() : '';
+      n.media = s ? [{ kind: 'url', url: s, type: n.media_type === 'video' ? 'video' : 'photo' }] : [];
+    }
+    if (n.wait_node && !flow.data.inactivity_node) flow.data.inactivity_node = n.wait_node;
+    delete n.wait_node;
+  });
+  if (flow.data.inactivity_node && !flow.data.nodes[flow.data.inactivity_node]) flow.data.inactivity_node = '';
   return flow;
 }
 
 async function openFlow(id) {
   const f = normalize(await api('/flows/' + id));
   currentFlow = f;
+  groupsCache = await api('/groups?bot_id=' + (f.bot_id || '')).then((r) => (Array.isArray(r) ? r : [])).catch(() => []);
   $('#flowSheetTitle').textContent = f.name;
   renderFlowSheet();
   $('#flowSheet').classList.add('open');
@@ -405,17 +439,23 @@ function renderFlowSheet() {
       ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900 text-emerald-300">Pix ' + fmtMoney(n.price) + '</span>'
       : '<span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">grátis</span>';
     const wait = Number(n.wait) > 0
-      ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-900 text-amber-300">⏱ ${n.wait}s${n.wait_node ? ' → ' + esc(n.wait_node) : ''}</span>`
+      ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-900 text-amber-300">⏱ ${n.wait}s</span>`
+      : '';
+    const inactBadge = currentFlow.data.inactivity_node === k
+      ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-orange-900 text-orange-300">⏱ inatividade</span>'
       : '';
     const remBadge = n.reminder_node
       ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-900 text-fuchsia-300">⏰ 1h → ${esc(n.reminder_node)}</span>`
+      : '';
+    const invBadge = n.invite_group
+      ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-900 text-sky-300">🎁 convite</span>'
       : '';
     const start_ = currentFlow.data.start === k ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300">INÍCIO</span>' : '';
     const btns = (n.buttons || []).map((b) => `→ <b>${esc(b.label)}</b> (${esc(b.to || 'fim')})`).join(' • ');
     return `<div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4" data-node="${esc(k)}">
       <div class="flex items-center justify-between gap-2">
         <div class="font-semibold truncate">${i + 1}. ${esc(k)}</div>
-        <div class="flex gap-1 flex-wrap justify-end items-center">${start_} ${badge} ${wait} ${remBadge}
+        <div class="flex gap-1 flex-wrap justify-end items-center">${start_} ${badge} ${wait} ${inactBadge} ${remBadge} ${invBadge}
           <button data-delnode="${esc(k)}" class="text-[10px] px-2 py-0.5 rounded-full bg-red-900 text-red-300 border border-red-800">✕ excluir</button>
         </div>
       </div>
@@ -446,7 +486,7 @@ $('#btnAddNode').addEventListener('click', () => {
   let i = currentFlow.data.order.length + 1;
   let key = 'no' + i;
   while (currentFlow.data.nodes[key]) { i++; key = 'no' + i; }
-  currentFlow.data.nodes[key] = { key, text: 'Nova mensagem', media: '', media_type: 'photo', wait: 0, price: 0, buttons: [], next: '', reminder: '', wait_node: '', reminder_node: '' };
+  currentFlow.data.nodes[key] = { key, text: 'Nova mensagem', media: [], wait: 0, price: 0, buttons: [], next: '', reminder: '', reminder_node: '', invite_group: '' };
   currentFlow.data.order.push(key);
   if (!currentFlow.data.start) currentFlow.data.start = key;
   openNode(key);
@@ -458,18 +498,28 @@ function openNode(key) {
   $('#nodeSheetTitle').textContent = 'Nó: ' + key;
   $('#nKey').value = key;
   $('#nText').value = n.text || '';
-  $('#nMedia').value = n.media || '';
-  $('#nMediaType').value = n.media_type === 'video' ? 'video' : 'photo';
   $('#nWait').value = n.wait || 0;
   $('#nPrice').value = n.price || 0;
+  $('#nIsInactivity').checked = (currentFlow.data.inactivity_node || '') === key;
+  updateInactivityHint();
   $('#nNext').innerHTML = nodeOptions(n.next || '');
-  $('#nWaitNode').innerHTML = nodeOptions(n.wait_node || '', true, key, '— usar o próximo nó —');
-  $('#nWaitNode').value = n.wait_node || '';
   $('#nReminderNode').innerHTML = nodeOptions(n.reminder_node || '', true, key, '— usar a mensagem de texto —');
   $('#nReminderNode').value = n.reminder_node || '';
   $('#nReminder').value = n.reminder || '';
+  $('#nInvite').innerHTML = '<option value="">— nenhum convite —</option>' +
+    (groupsCache || []).map((g) => `<option value="${g.id}">${esc(g.title || g.chat_id)} (${esc(g.chat_id)})</option>`).join('');
+  $('#nInvite').value = String(n.invite_group || '');
   renderButtonsEditor(n.buttons || []);
+  renderMediaEditor();
   $('#nodeSheet').classList.add('open');
+}
+
+function updateInactivityHint() {
+  const hint = $('#inactivityHint');
+  const marked = currentFlow ? currentFlow.data.inactivity_node : '';
+  if (marked && marked === editingKey) hint.innerHTML = '✅ Este nó é o destino da inatividade do fluxo.';
+  else if (marked) hint.innerHTML = '⚠️ Hoje o destino da inatividade é o nó <b>' + esc(marked) + '</b>. Marcar aqui move o destino pra este nó (só 1 por fluxo).';
+  else hint.innerHTML = 'Quando o tempo de um nó expirar, o cliente vem pra cá. Só pode estar marcado em <b>1 nó por fluxo</b>.';
 }
 
 function renderButtonsEditor(buttons) {
@@ -495,6 +545,92 @@ $('#btnAddButton').addEventListener('click', () => {
 
 $('#nodeBack').addEventListener('click', () => $('#nodeSheet').classList.remove('open'));
 
+function nodeMedia() {
+  const n = currentFlow && editingKey ? currentFlow.data.nodes[editingKey] : null;
+  if (!n) return [];
+  if (!Array.isArray(n.media)) n.media = [];
+  return n.media;
+}
+
+function renderMediaEditor() {
+  const items = nodeMedia();
+  const box = $('#mediaList');
+  if (!items.length) { box.innerHTML = '<p class="text-xs text-slate-500">Sem mídia — só o texto será enviado.</p>'; return; }
+  box.innerHTML = items.map((m, i) => {
+    const isFile = m.kind === 'file';
+    const preview = isFile
+      ? (m.type === 'photo'
+          ? `<img src="/uploads/${esc(m.file)}" class="w-10 h-10 rounded-lg object-cover shrink-0" />`
+          : `<span class="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center shrink-0 text-lg">${m.type === 'video' ? '🎬' : '📄'}</span>`)
+      : '<span class="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center shrink-0 text-lg">🔗</span>';
+    const shown = isFile ? (m.name || m.file) : m.url;
+    return `<div class="flex gap-2 items-center bg-slate-950 border border-slate-700 rounded-xl p-2">
+      ${preview}
+      <div class="flex-1 min-w-0">
+        <input data-mu="${i}" value="${esc(shown)}" ${isFile ? 'readonly' : ''} class="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700" />
+        <p class="text-[10px] text-slate-500 truncate">${isFile ? 'arquivo local' : 'URL'}</p>
+      </div>
+      <select data-mt="${i}" class="w-24 px-2 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700 shrink-0">
+        <option value="photo" ${m.type === 'photo' ? 'selected' : ''}>Foto</option>
+        <option value="video" ${m.type === 'video' ? 'selected' : ''}>Vídeo</option>
+        <option value="document" ${m.type === 'document' ? 'selected' : ''}>Arquivo</option>
+      </select>
+      <button data-md="${i}" class="px-2.5 py-1.5 rounded-lg bg-red-900/60 border border-red-800 text-sm shrink-0">✕</button>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('[data-mu]').forEach((el) => el.oninput = () => { const m = nodeMedia()[+el.dataset.mu]; if (m && m.kind !== 'file') m.url = el.value.trim(); });
+  box.querySelectorAll('[data-mt]').forEach((el) => el.onchange = () => { const m = nodeMedia()[+el.dataset.mt]; if (m) m.type = el.value; });
+  box.querySelectorAll('[data-md]').forEach((el) => el.onclick = () => { nodeMedia().splice(+el.dataset.md, 1); renderMediaEditor(); });
+}
+
+$('#btnPickFiles').addEventListener('click', () => $('#nFiles').click());
+$('#nFiles').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length) return;
+  for (const f of files) {
+    try {
+      const res = await fetch('/api/uploads?name=' + encodeURIComponent(f.name), {
+        method: 'POST',
+        headers: { 'Content-Type': f.type || 'application/octet-stream' },
+        body: f
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) { showLogin(); throw new Error('Sessão expirada'); }
+      if (!res.ok) throw new Error(data.error || 'Erro ' + res.status);
+      nodeMedia().push({ kind: 'file', file: data.file, name: data.name, type: data.type });
+      toast('✔ ' + data.name);
+    } catch (err) { toast(err.message, false); }
+  }
+  renderMediaEditor();
+});
+
+$('#btnAddUrl').addEventListener('click', () => {
+  const input = $('#newMediaUrl');
+  const url = input.value.trim();
+  if (!/^https?:\/\//i.test(url)) return toast('URL precisa começar com http:// ou https://', false);
+  nodeMedia().push({ kind: 'url', url, type: /\.(mp4|webm|mov|mkv)(\?|$)/i.test(url) ? 'video' : 'photo' });
+  input.value = '';
+  renderMediaEditor();
+});
+$('#newMediaUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#btnAddUrl').click(); } });
+
+$('#nIsInactivity').addEventListener('change', (e) => {
+  if (!currentFlow) return;
+  if (e.target.checked) {
+    const prev = currentFlow.data.inactivity_node;
+    currentFlow.data.inactivity_node = editingKey;
+    if (prev && prev !== editingKey) toast('Nó da inatividade movido de "' + prev + '" para "' + editingKey + '"');
+    else toast('Nó da inatividade marcado');
+  } else if (currentFlow.data.inactivity_node === editingKey) {
+    currentFlow.data.inactivity_node = '';
+    toast('Nó da inatividade desmarcado');
+  }
+  updateInactivityHint();
+  saveFlow(true);
+  renderFlowSheet();
+});
+
 function deleteNode(key) {
   if (!currentFlow || !currentFlow.data.nodes[key]) return;
   if (!confirm('Excluir o nó "' + key + '"?')) return;
@@ -503,9 +639,9 @@ function deleteNode(key) {
   Object.values(currentFlow.data.nodes).forEach((n) => {
     (n.buttons || []).forEach((b) => { if (b.to === key) b.to = ''; });
     if (n.next === key) n.next = '';
-    if (n.wait_node === key) n.wait_node = '';
     if (n.reminder_node === key) n.reminder_node = '';
   });
+  if (currentFlow.data.inactivity_node === key) currentFlow.data.inactivity_node = '';
   if (currentFlow.data.start === key) currentFlow.data.start = currentFlow.data.order[0] || '';
   if (editingKey === key) editingKey = null;
   $('#nodeSheet').classList.remove('open');
@@ -521,10 +657,11 @@ $('#nodeSave').addEventListener('click', () => {
   if (newKey !== oldKey && currentFlow.data.nodes[newKey]) return toast('Já existe um nó com esse ID', false);
 
   const n = currentFlow.data.nodes[oldKey];
-  const text = { key: newKey, text: $('#nText').value, media: $('#nMedia').value.trim(), media_type: $('#nMediaType').value,
+  const text = { key: newKey, text: $('#nText').value,
+    media: Array.isArray(n.media) ? n.media : [],
     wait: Number($('#nWait').value) || 0, price: Number($('#nPrice').value) || 0,
     buttons: n.buttons || [], next: $('#nNext').value, reminder: $('#nReminder').value,
-    wait_node: $('#nWaitNode').value, reminder_node: $('#nReminderNode').value };
+    reminder_node: $('#nReminderNode').value, invite_group: Number($('#nInvite').value) || '' };
 
   if (newKey !== oldKey) {
     delete currentFlow.data.nodes[oldKey];
@@ -532,10 +669,10 @@ $('#nodeSave').addEventListener('click', () => {
     Object.values(currentFlow.data.nodes).forEach((x) => {
       (x.buttons || []).forEach((b) => { if (b.to === oldKey) b.to = newKey; });
       if (x.next === oldKey) x.next = newKey;
-      if (x.wait_node === oldKey) x.wait_node = newKey;
       if (x.reminder_node === oldKey) x.reminder_node = newKey;
     });
     if (currentFlow.data.start === oldKey) currentFlow.data.start = newKey;
+    if (currentFlow.data.inactivity_node === oldKey) currentFlow.data.inactivity_node = newKey;
   }
   currentFlow.data.nodes[newKey] = text;
   editingKey = newKey;
@@ -573,6 +710,63 @@ async function loadPayments() {
       <span class="text-[10px] px-2 py-1 rounded-full shrink-0 ${payColor[p.status] || 'bg-slate-800'}">${esc(p.status)}</span>
     </div>`).join('') : '<p class="text-slate-500 text-sm text-center py-6">Nenhum pagamento gerado ainda.</p>';
 }
+
+/* ================= grupos (convites de uso unico) ================= */
+async function loadGroups() {
+  if (!botsCache.length) botsCache = await api('/bots').catch(() => []);
+  const sel = $('#groupBotSelect');
+  const prev = sel.value;
+  sel.innerHTML = botsCache.length
+    ? botsCache.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join('')
+    : '<option value="">— cadastre um bot primeiro —</option>';
+  const field = $('#groupChatId');
+  if (prev && botsCache.some((b) => String(b.id) === prev)) sel.value = prev;
+  else sel.value = botsCache[0] ? String(botsCache[0].id) : '';
+
+  const msg = $('#groupMsg');
+  msg.classList.add('hidden');
+  msg.textContent = '';
+  msg.className = 'text-xs hidden';
+
+  if (!sel.value) return;
+
+  const rows = await api('/groups?bot_id=' + sel.value).catch(() => []);
+  const box = $('#groupsList');
+  box.innerHTML = rows.length ? rows.map((g) => `
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <div class="text-sm font-semibold truncate">📢 ${esc(g.title || g.chat_id)}</div>
+        <div class="text-[11px] text-slate-500 truncate">id ${esc(g.chat_id)} • adicionado ${fmtDate(g.created_at)}</div>
+      </div>
+      <button data-delgroup="${g.id}" class="text-[10px] px-2 py-1 rounded-full bg-red-900 text-red-300 border border-red-800 shrink-0">remover</button>
+    </div>`).join('') : '<p class="text-slate-500 text-sm text-center py-6">Nenhum grupo cadastrado para este bot.</p>';
+  box.querySelectorAll('[data-delgroup]').forEach((el) => el.onclick = () => deleteGroup(+el.dataset.delgroup));
+}
+
+async function deleteGroup(id) {
+  if (!confirm('Remover esse grupo (os convites não serão mais gerados)?')) return;
+  try {
+    await api('/groups/' + id, { method: 'DELETE' });
+    toast('Grupo removido');
+    loadGroups();
+  } catch (e) { toast(e.message, false); }
+}
+
+$('#groupBotSelect').addEventListener('change', loadGroups);
+$('#formGroup').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('#groupMsg');
+  const show = (text, ok) => {
+    msg.textContent = (ok ? '✔ ' : '✖ ') + text;
+    msg.className = 'text-xs ' + (ok ? 'text-emerald-400' : 'text-red-400') + ' mt-2';
+  };
+  try {
+    const group = await api('/groups', { method: 'POST', body: { bot_id: Number($('#groupBotSelect').value), chat_id: $('#groupChatId').value } });
+    $('#groupChatId').value = '';
+    show('Grupo cadastrado: ' + (group.title || group.chat_id), true);
+    loadGroups();
+  } catch (err) { show(err.message, false); }
+});
 
 /* ================= boot ================= */
 (async function boot() {

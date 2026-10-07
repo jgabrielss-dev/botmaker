@@ -13,6 +13,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const api = require('./api');
+const db = require('./db');
 const E = require('./engine');
 const { startJobs } = require('./jobs');
 const { startPolling } = require('./poll');
@@ -23,6 +24,7 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use('/uploads', express.static(path.join(db.DATA_DIR, 'uploads')));
 
 /* Webhook do Telegram - um endpoint por bot */
 app.post('/tg/:botId', async (req, res) => {

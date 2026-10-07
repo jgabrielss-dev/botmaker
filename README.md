@@ -2,7 +2,8 @@
 
 Sistema completo para gerenciar **múltiplos bots do Telegram** com construtor de fluxos
 (nós e trilhas), integração **Pix via Mercado Pago**, trava de pagamento, cron de
-lembretes e painel **100% mobile** (feito para usar no celular).
+lembretes, **mídia múltipla (URLs e/ou arquivos locais)**, **convites de grupo de uso
+único** e painel **100% mobile** (feito para usar no celular).
 
 ## Stack
 
@@ -22,15 +23,16 @@ telegram/
 ├── .gitignore
 ├── README.md
 ├── public/
-│   └── index.html        # painel mobile (login, bots, builder de fluxos, clientes, Pix)
+│   └── index.html        # painel mobile (login, bots, builder de fluxos, grupos, clientes, Pix)
 └── server/
-    ├── index.js          # app Express, webhook Telegram /tg/:botId, webhook MP /mp/webhook
-    ├── db.js             # SQLite (node:sqlite) e schema
+    ├── index.js          # app Express, webhook Telegram /tg/:botId, webhook MP /mp/webhook, /uploads
+    ├── db.js             # SQLite (node:sqlite) e schema (bots, flows, clients, payments, groups)
     ├── auth.js           # login por senha + cookie de sessão HttpOnly
-    ├── api.js            # REST do painel (/api/bots, /api/flows, /api/clients, /api/payments)
+    ├── api.js            # REST do painel (/api/bots, /api/flows, /api/groups, /api/uploads, ...)
     ├── engine.js         # máquina de estados: entrada de nó, Pix, avanço, webhooks
-    ├── telegram.js       # chamadas da API do Telegram (mensagens, mídia, botões, setWebhook)
+    ├── telegram.js       # API do Telegram (mensagens, mídia múltipla, botões, convites, webhook)
     ├── mercadopago.js    # criação de Pix (/v1/payments) e consulta de status
+    ├── poll.js           # polling local (getUpdates) p/ bots sem webhook
     └── jobs.js           # inatividade (15s), sincronia de pagamentos (60s), lembrete (1h)
 ```
 
@@ -125,19 +127,27 @@ com processo contínuo + disco (Railway/Render) ou PostgreSQL.
 3. Monte os nós:
    - **ID**: chave do nó (ex.: `inicio`, `pay`, `obrigado`)
    - **Mensagem**: texto (aceita `<b>`, `<i>`, `<code>`)
-   - **URL de mídia**: foto ou vídeo enviados pelo bot
+   - **Mídias**: *várias* URLs e/ou arquivos do aparelho (📎) — foto/vídeo/pdf/áudio.
+     O texto do nó vira legenda da **primeira** mídia (fallback: texto separado); os
+     arquivos locais ficam em `DATA_DIR/uploads/` e vão ao Telegram como multipart
    - **Inatividade (s)**: se o usuário não interagir, o fluxo avança sozinho
-   - **Nó da inatividade**: *outro nó* para onde a inatividade leva (vazio = usar o *próximo nó*).
-     O próprio nó nunca é alvo (sem loop)
+   - **Este é o nó da inatividade** (marcador do fluxo, só 1 por fluxo): quando o tempo
+     de *qualquer* nó expirar, o cliente vem pra cá. O próprio nó atual nunca é alvo
+     (sem loop). Sem marcador, cai no campo antigo `wait_node` (se existir) ou no
+     *próximo nó*
    - **Valor Pix**: `> 0` trava o nó e gera o Pix Copia e Cola + QR Code
    - **Botões inline**: cada botão leva ao nó escolhido
    - **Próximo nó**: usado quando não há botão (ou depois do pagamento aprovado)
    - **Nó do lembrete**: nó usado pelo cron de 1 hora **sempre que não houver caminho**
      (fim de linha ou Pix travado)
    - **Mensagem de lembrete**: texto usado apenas se o *Nó do lembrete* estiver vazio
+   - **Convite de uso único**: grupo (cadastrado na aba 📢 Grupos) cujo link de
+     **1 pessoa só** (`member_limit=1`) é enviado **depois** da mensagem deste nó
    - Defina o **nó inicial** no topo e toque em **Ativar**.
-4. **Aba Clientes**: veja em que nó cada usuário está (Ativo / Aguardando Pix / Concluído).
-5. **Aba Pix**: histórico de pagamentos com status.
+4. **Aba Grupos**: cadastre os grupos onde o bot é **administrador** (com permissão de
+   "adicionar membros") — validados via `getChatMember`. Eles aparecem no campo de convite.
+5. **Aba Clientes**: veja em que nó cada usuário está (Ativo / Aguardando Pix / Concluído).
+6. **Aba Pix**: histórico de pagamentos com status.
 
 ## 6. Mercado Pago — webhooks
 
@@ -151,7 +161,7 @@ com processo contínuo + disco (Railway/Render) ou PostgreSQL.
 
 | Job | Intervalo | O que faz |
 |---|---|---|
-| Inatividade | 15s | Avança para o *nó da inatividade* (ou o próximo nó) quando o timer do nó expira |
+| Inatividade | 15s | Avança para o *nó marcado como inatividade* no fluxo (ou o `wait_node` antigo, ou o próximo nó) quando o timer do nó expira |
 | Sincronia de pagamentos | 60s | Confere status no MP (rede de segurança caso o webhook retraie) |
 | Lembrete/recuperação | 1h | Quando não há caminho (Pix travado ou fim de linha): vai para o *nó do lembrete*; sem nó definido, envia o texto de lembrete |
 

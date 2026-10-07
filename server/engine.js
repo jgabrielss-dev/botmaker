@@ -86,6 +86,26 @@ async function createPayment(bot, client, flow, node, nodeKey) {
   return db.prepare('SELECT * FROM payments WHERE id = ?').get(info.lastInsertRowid);
 }
 
+/* Convite de uso unico do grupo configurado no no (enviado no fim do no) */
+async function sendInvite(bot, chatId, node) {
+  const gid = Number(node.invite_group || 0);
+  if (!gid) return;
+  try {
+    const group = db.prepare('SELECT * FROM groups WHERE id = ? AND bot_id = ?').get(gid, bot.id);
+    if (!group) return;
+    const link = await tg.createOneTimeInvite(bot.token, group.chat_id, (group.title || 'Convite').slice(0, 32));
+    await tg.sendText(
+      bot.token,
+      chatId,
+      '🔒 <b>Convite de uso único</b>' +
+        (group.title ? '\nGrupo: ' + group.title : '') +
+        '\nVálido para apenas 1 pessoa:\n<code>' + link + '</code>'
+    );
+  } catch (e) {
+    console.error('invite error bot=' + bot.id, e.message);
+  }
+}
+
 async function enterNode(bot, client, flow, nodeKey) {
   const node = getNode(flow, nodeKey);
   if (!node) {
@@ -115,6 +135,7 @@ async function enterNode(bot, client, flow, nodeKey) {
     return;
   }
   await tg.sendNode(bot.token, client.chat_id, node);
+  await sendInvite(bot, client.chat_id, node);
 }
 
 async function advance(bot, client, flow, toKey) {

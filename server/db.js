@@ -89,6 +89,16 @@ CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bot_id INTEGER NOT NULL,
+  chat_id TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(bot_id, chat_id)
+);
 `);
 
+db.DATA_DIR = DATA_DIR;
 module.exports = db;

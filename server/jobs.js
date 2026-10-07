@@ -17,9 +17,11 @@ function tickInactivity() {
       if (!node) continue;
       const wait = Number(node.wait || 0);
       if (wait <= 0) continue;
-      // destino da inatividade: campo proprio "no da inatividade", senao o "proximo no".
-      // Nunca volta para o proprio no.
-      const target = String(node.wait_node || node.next || '').trim();
+      // destino da inatividade: no marcado no FLUXO (toggle "este e o no da inatividade"),
+      // senao o campo legado do no, senao o proximo no. Nunca volta para o proprio no.
+      const target = String(
+        (flow.json && flow.json.inactivity_node) || node.wait_node || node.next || ''
+      ).trim();
       if (!target || target === client.node_key) continue;
       if (now - client.last_activity < wait * 1000) continue;
       E.updateClient(client.id, { last_activity: now, updated_at: now });
