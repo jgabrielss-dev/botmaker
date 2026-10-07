@@ -120,6 +120,75 @@ global.fetch = async (url, opts) => {
   assert.ok(auth.login('admin'), 'padrao admin deveria valer sem a variavel');
   console.log('8. normalizacao de senha OK');
 
+  // 9) inatividade usa o campo proprio "no da inatividade"
+  const data3 = {
+    start: 'a',
+    order: ['a', 'b', 'c'],
+    nodes: {
+      a: { text: 'A', wait: 5, price: 0, buttons: [{ label: 'ir', to: 'b' }], next: '', wait_node: 'c' },
+      b: { text: 'B', wait: 0, price: 0, buttons: [], next: '' },
+      c: { text: 'C', wait: 0, price: 0, buttons: [], next: '' }
+    }
+  };
+  db.prepare('INSERT INTO flows (bot_id, name, data, created_at) VALUES (?,?,?,?)').run(botId, 'Fluxo 3', JSON.stringify(data3), Date.now());
+  const flow3 = db.prepare('SELECT * FROM flows WHERE bot_id = ? ORDER BY id DESC').get(botId);
+  db.prepare('UPDATE bots SET flow_id = ? WHERE id = ?').run(flow3.id, botId);
+  await E.handleUpdate(E.getBot(botId), { message: { chat: { id: 888 }, text: '/start' } });
+  let c3 = E.getClient(botId, 888);
+  assert.strictEqual(c3.node_key, 'a');
+  db.prepare('UPDATE clients SET last_activity = ? WHERE id = ?').run(Date.now() - 60000, c3.id);
+  jobs.tickInactivity();
+  c3 = E.getClient(botId, 888);
+  assert.strictEqual(c3.node_key, 'c', 'inatividade deveria ir para o no "c" (campo proprio) e nao para "b"');
+  console.log('9. inatividade leva para o NO DA INATIVIDADE OK');
+
+  // 10) inatividade nunca volta para o proprio no
+  const d3 = JSON.parse(flow3.data);
+  d3.nodes.c = { text: 'C', wait: 5, price: 0, buttons: [], next: '', wait_node: 'c' };
+  db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(JSON.stringify(d3), flow3.id);
+  db.prepare('UPDATE clients SET last_activity = ? WHERE id = ?').run(Date.now() - 60000, c3.id);
+  jobs.tickInactivity();
+  c3 = E.getClient(botId, 888);
+  assert.strictEqual(c3.node_key, 'c', 'nao deveria voltar para o proprio no');
+  console.log('10. inatividade ignora self-loop OK');
+
+  // 11) cron de 1h leva para o NO DO LEMBRETE quando nao ha caminho
+  db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(
+    JSON.stringify({
+      start: 'presa',
+      order: ['presa', 'resgate'],
+      nodes: {
+        presa: { text: 'Sem caminho', wait: 0, price: 0, buttons: [], next: '', reminder: 'texto antigo', reminder_node: 'resgate' },
+        resgate: { text: 'Voltou! Use os botoes', wait: 0, price: 0, buttons: [{ label: 'continuar', to: 'presa' }], next: '' }
+      }
+    }),
+    flow3.id
+  );
+  db.prepare("UPDATE clients SET status = 'active', node_key = 'presa', last_reminder = 0, payment_id = NULL WHERE id = ?").run(c3.id);
+  jobs.tickReminders();
+  c3 = E.getClient(botId, 888);
+  assert.strictEqual(c3.node_key, 'resgate', 'cron deveria levar para o no do lembrete e nao enviar o texto do no');
+  const remMsg11 = calls.filter((x) => x.url.includes('sendMessage')).map((x) => JSON.parse(x.body).text);
+  assert.ok(!remMsg11.includes('texto antigo'), 'nao deveria usar o texto de lembrete quando ha no de lembrete');
+  console.log('11. cron de 1h leva para o NO DO LEMBRETE OK');
+
+  // 12) no com caminho de inatividade NAO e fim de linha (cron nao dispara)
+  const d12 = JSON.parse(db.prepare('SELECT data FROM flows WHERE id = ?').get(flow3.id).data);
+  d12.nodes.presa = { text: 'Sem caminho', wait: 30, price: 0, buttons: [], next: '', wait_node: 'resgate', reminder_node: 'resgate' };
+  db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(JSON.stringify(d12), flow3.id);
+  db.prepare("UPDATE clients SET node_key = 'presa', last_reminder = 0 WHERE id = ?").run(c3.id);
+  jobs.tickReminders();
+  c3 = E.getClient(botId, 888);
+  assert.strictEqual(c3.node_key, 'presa', 'no com saida por inatividade nao e fim de linha');
+  assert.strictEqual(c3.last_reminder, 0, 'cron nao deveria disparar quando ha caminho');
+  console.log('12. inatividade conta como caminho OK');
+
+  // 13) so roda polling em bot sem webhook
+  const poll = require('../server/poll');
+  assert.strictEqual(poll.pollable({ webhook_url: '' }), true, 'bot sem webhook deve usar polling');
+  assert.strictEqual(poll.pollable({ webhook_url: 'https://x/tg/1' }), false, 'bot com webhook nao deve usar polling');
+  console.log('13. polling local somente sem webhook OK');
+
   console.log('\nTODOS OS TESTES PASSARAM');
   process.exit(0);
 })().catch((e) => {

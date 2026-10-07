@@ -16,10 +16,14 @@ function tickInactivity() {
       const node = E.getNode(flow, client.node_key);
       if (!node) continue;
       const wait = Number(node.wait || 0);
-      if (wait <= 0 || !node.next) continue;
+      if (wait <= 0) continue;
+      // destino da inatividade: campo proprio "no da inatividade", senao o "proximo no".
+      // Nunca volta para o proprio no.
+      const target = String(node.wait_node || node.next || '').trim();
+      if (!target || target === client.node_key) continue;
       if (now - client.last_activity < wait * 1000) continue;
       E.updateClient(client.id, { last_activity: now, updated_at: now });
-      E.advance(bot, client, flow, node.next);
+      E.advance(bot, client, flow, target).catch((e) => console.error('inactivity advance:', e.message));
     } catch (e) {
       console.error('inactivity error:', e.message);
     }
@@ -77,10 +81,23 @@ function tickReminders() {
         }
         if (!payment || payment.status === 'pending' || payment.status === 'expired') reason = 'pix';
       } else {
-        const deadEnd = (!node.buttons || !node.buttons.length) && !node.next;
-        if (deadEnd) reason = 'end';
+        // caminho livre = botao, proximo no, ou inatividade que leva a outro no
+        const hasPath =
+          (node.buttons && node.buttons.length > 0) ||
+          !!node.next ||
+          (Number(node.wait || 0) > 0 && !!node.wait_node);
+        if (!hasPath) reason = 'end';
       }
       if (!reason) continue;
+
+      E.updateClient(client.id, { last_reminder: now, updated_at: now });
+
+      // No dedicado ao cron de 1h: SEMPRE usado quando nao ha caminho (fim de linha ou Pix travado)
+      const reminderNode = String(node.reminder_node || '').trim();
+      if (reminderNode && reminderNode !== client.node_key && E.getNode(flow, reminderNode)) {
+        E.advance(bot, client, flow, reminderNode).catch((e) => console.error('reminder advance:', e.message));
+        continue;
+      }
 
       const msg =
         node.reminder && node.reminder.trim()
@@ -89,7 +106,6 @@ function tickReminders() {
           ? '👋 Você ainda não finalizou o pagamento. Estou aqui caso precise de ajuda para concluir o Pix.'
           : '👋 Sentimos sua falta! Continue de onde parou respondendo aqui ou usando os botões.';
 
-      E.updateClient(client.id, { last_reminder: now, updated_at: now });
       tg.sendText(bot.token, client.chat_id, msg).catch((e) => console.error('reminder error:', e.message));
     } catch (e) {
       console.error('reminder job error:', e.message);

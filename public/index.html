@@ -141,11 +141,19 @@
       </div>
     </div>
     <div>
+      <label class="text-xs text-slate-400">Nó da inatividade (outro nó • vazio = usar o próximo nó)</label>
+      <select id="nWaitNode" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
+    </div>
+    <div>
       <label class="text-xs text-slate-400">Próximo nó (sem botão / após pagamento aprovado)</label>
       <select id="nNext" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
     </div>
     <div>
-      <label class="text-xs text-slate-400">Mensagem de lembrete (cron 1h) — opcional</label>
+      <label class="text-xs text-slate-400">Nó do lembrete (cron 1h) — leva o cliente pra cá SEMPRE que não houver caminho</label>
+      <select id="nReminderNode" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Mensagem de lembrete (texto — só usada se o Nó do lembrete estiver vazio)</label>
       <textarea id="nReminder" rows="2" placeholder="Ex.: Seu Pix ainda está pendente..." class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700"></textarea>
     </div>
 
@@ -258,7 +266,7 @@ async function loadBots() {
           <div class="font-semibold truncate">${esc(b.name)}</div>
           <div class="text-[11px] text-slate-500 truncate">ID ${b.id} • criado ${fmtDate(b.created_at)}</div>
           <div class="text-[11px] ${b.webhook_url ? 'text-emerald-400' : 'text-amber-400'} break-all mt-1">
-            ${b.webhook_url ? '✔ webhook: ' + esc(b.webhook_url) : '⚠ webhook não configurado'}
+            ${b.webhook_url ? '✔ webhook: ' + esc(b.webhook_url) : '⚡ sem webhook — respondendo em polling local (funciona sem URL pública)'}
           </div>
         </div>
         <div class="flex flex-col gap-2 shrink-0">
@@ -374,9 +382,9 @@ $('#flowActivate').addEventListener('click', async () => {
   toast('Fluxo ativado neste bot');
 });
 
-function nodeOptions(selected, includeEnd = true) {
-  const keys = currentFlow.data.order;
-  let html = includeEnd ? '<option value="">— nenhum / fim —</option>' : '<option value="">— selecione —</option>';
+function nodeOptions(selected, includeEnd = true, exclude = null, endLabel = '— nenhum / fim —') {
+  const keys = currentFlow.data.order.filter((k) => k !== exclude);
+  let html = includeEnd ? `<option value="">${endLabel}</option>` : '<option value="">— selecione —</option>';
   html += keys.map((k) => `<option value="${esc(k)}" ${k === selected ? 'selected' : ''}>${esc(k)}</option>`).join('');
   return html;
 }
@@ -396,13 +404,18 @@ function renderFlowSheet() {
     const badge = Number(n.price) > 0
       ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900 text-emerald-300">Pix ' + fmtMoney(n.price) + '</span>'
       : '<span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">grátis</span>';
-    const wait = Number(n.wait) > 0 ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-900 text-amber-300">⏱ ${n.wait}s</span>` : '';
+    const wait = Number(n.wait) > 0
+      ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-900 text-amber-300">⏱ ${n.wait}s${n.wait_node ? ' → ' + esc(n.wait_node) : ''}</span>`
+      : '';
+    const remBadge = n.reminder_node
+      ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-900 text-fuchsia-300">⏰ 1h → ${esc(n.reminder_node)}</span>`
+      : '';
     const start_ = currentFlow.data.start === k ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300">INÍCIO</span>' : '';
     const btns = (n.buttons || []).map((b) => `→ <b>${esc(b.label)}</b> (${esc(b.to || 'fim')})`).join(' • ');
     return `<div class="card bg-slate-900 border border-slate-800 rounded-2xl p-4" data-node="${esc(k)}">
       <div class="flex items-center justify-between gap-2">
         <div class="font-semibold truncate">${i + 1}. ${esc(k)}</div>
-        <div class="flex gap-1 flex-wrap justify-end items-center">${start_} ${badge} ${wait}
+        <div class="flex gap-1 flex-wrap justify-end items-center">${start_} ${badge} ${wait} ${remBadge}
           <button data-delnode="${esc(k)}" class="text-[10px] px-2 py-0.5 rounded-full bg-red-900 text-red-300 border border-red-800">✕ excluir</button>
         </div>
       </div>
@@ -433,7 +446,7 @@ $('#btnAddNode').addEventListener('click', () => {
   let i = currentFlow.data.order.length + 1;
   let key = 'no' + i;
   while (currentFlow.data.nodes[key]) { i++; key = 'no' + i; }
-  currentFlow.data.nodes[key] = { key, text: 'Nova mensagem', media: '', media_type: 'photo', wait: 0, price: 0, buttons: [], next: '', reminder: '' };
+  currentFlow.data.nodes[key] = { key, text: 'Nova mensagem', media: '', media_type: 'photo', wait: 0, price: 0, buttons: [], next: '', reminder: '', wait_node: '', reminder_node: '' };
   currentFlow.data.order.push(key);
   if (!currentFlow.data.start) currentFlow.data.start = key;
   openNode(key);
@@ -450,6 +463,10 @@ function openNode(key) {
   $('#nWait').value = n.wait || 0;
   $('#nPrice').value = n.price || 0;
   $('#nNext').innerHTML = nodeOptions(n.next || '');
+  $('#nWaitNode').innerHTML = nodeOptions(n.wait_node || '', true, key, '— usar o próximo nó —');
+  $('#nWaitNode').value = n.wait_node || '';
+  $('#nReminderNode').innerHTML = nodeOptions(n.reminder_node || '', true, key, '— usar a mensagem de texto —');
+  $('#nReminderNode').value = n.reminder_node || '';
   $('#nReminder').value = n.reminder || '';
   renderButtonsEditor(n.buttons || []);
   $('#nodeSheet').classList.add('open');
@@ -486,6 +503,8 @@ function deleteNode(key) {
   Object.values(currentFlow.data.nodes).forEach((n) => {
     (n.buttons || []).forEach((b) => { if (b.to === key) b.to = ''; });
     if (n.next === key) n.next = '';
+    if (n.wait_node === key) n.wait_node = '';
+    if (n.reminder_node === key) n.reminder_node = '';
   });
   if (currentFlow.data.start === key) currentFlow.data.start = currentFlow.data.order[0] || '';
   if (editingKey === key) editingKey = null;
@@ -504,7 +523,8 @@ $('#nodeSave').addEventListener('click', () => {
   const n = currentFlow.data.nodes[oldKey];
   const text = { key: newKey, text: $('#nText').value, media: $('#nMedia').value.trim(), media_type: $('#nMediaType').value,
     wait: Number($('#nWait').value) || 0, price: Number($('#nPrice').value) || 0,
-    buttons: n.buttons || [], next: $('#nNext').value, reminder: $('#nReminder').value };
+    buttons: n.buttons || [], next: $('#nNext').value, reminder: $('#nReminder').value,
+    wait_node: $('#nWaitNode').value, reminder_node: $('#nReminderNode').value };
 
   if (newKey !== oldKey) {
     delete currentFlow.data.nodes[oldKey];
@@ -512,6 +532,8 @@ $('#nodeSave').addEventListener('click', () => {
     Object.values(currentFlow.data.nodes).forEach((x) => {
       (x.buttons || []).forEach((b) => { if (b.to === oldKey) b.to = newKey; });
       if (x.next === oldKey) x.next = newKey;
+      if (x.wait_node === oldKey) x.wait_node = newKey;
+      if (x.reminder_node === oldKey) x.reminder_node = newKey;
     });
     if (currentFlow.data.start === oldKey) currentFlow.data.start = newKey;
   }

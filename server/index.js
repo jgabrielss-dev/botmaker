@@ -15,6 +15,7 @@ const express = require('express');
 const api = require('./api');
 const E = require('./engine');
 const { startJobs } = require('./jobs');
+const { startPolling } = require('./poll');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,4 +62,5 @@ app.listen(PORT, () => {
   if (!process.env.BASE_URL) console.log('AVISO: defina BASE_URL no .env para ativar os webhooks.');
   if (!process.env.MERCADO_PAGO_ACCESS_TOKEN) console.log('AVISO: defina MERCADO_PAGO_ACCESS_TOKEN no .env para gerar Pix.');
   startJobs();
+  startPolling();
 });

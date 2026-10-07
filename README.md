@@ -44,8 +44,9 @@ npm start
 # abra http://localhost:3000
 ```
 
-> Localmente os webhooks do Telegram/MP não funcionam (precisam de URL pública HTTPS).
-> Para validar a lógica rode o auto-teste: `npm test` (Telegram e MP mockados).
+> Localmente os webhooks do Telegram/MP não funcionam (precisam de URL pública HTTPS),
+> mas **sem `BASE_URL` o servidor entra em polling local** (`getUpdates`) e o bot
+> responde normalmente na sua máquina. Para validar a lógica rode também o auto-teste: `npm test`.
 
 ## 2. Configuração (.env)
 
@@ -125,11 +126,15 @@ com processo contínuo + disco (Railway/Render) ou PostgreSQL.
    - **ID**: chave do nó (ex.: `inicio`, `pay`, `obrigado`)
    - **Mensagem**: texto (aceita `<b>`, `<i>`, `<code>`)
    - **URL de mídia**: foto ou vídeo enviados pelo bot
-   - **Inatividade (s)**: se o usuário não interagir, o fluxo avança sozinho para o *próximo nó*
+   - **Inatividade (s)**: se o usuário não interagir, o fluxo avança sozinho
+   - **Nó da inatividade**: *outro nó* para onde a inatividade leva (vazio = usar o *próximo nó*).
+     O próprio nó nunca é alvo (sem loop)
    - **Valor Pix**: `> 0` trava o nó e gera o Pix Copia e Cola + QR Code
    - **Botões inline**: cada botão leva ao nó escolhido
    - **Próximo nó**: usado quando não há botão (ou depois do pagamento aprovado)
-   - **Mensagem de lembrete**: texto do cron de 1 hora
+   - **Nó do lembrete**: nó usado pelo cron de 1 hora **sempre que não houver caminho**
+     (fim de linha ou Pix travado)
+   - **Mensagem de lembrete**: texto usado apenas se o *Nó do lembrete* estiver vazio
    - Defina o **nó inicial** no topo e toque em **Ativar**.
 4. **Aba Clientes**: veja em que nó cada usuário está (Ativo / Aguardando Pix / Concluído).
 5. **Aba Pix**: histórico de pagamentos com status.
@@ -146,12 +151,14 @@ com processo contínuo + disco (Railway/Render) ou PostgreSQL.
 
 | Job | Intervalo | O que faz |
 |---|---|---|
-| Inatividade | 15s | Avança para o *próximo nó* quando o timer do nó expira |
+| Inatividade | 15s | Avança para o *nó da inatividade* (ou o próximo nó) quando o timer do nó expira |
 | Sincronia de pagamentos | 60s | Confere status no MP (rede de segurança caso o webhook retraie) |
-| Lembrete/recuperação | 1h | Mensagem de reengajamento para Pix pendente/expirado ou fim de linha |
+| Lembrete/recuperação | 1h | Quando não há caminho (Pix travado ou fim de linha): vai para o *nó do lembrete*; sem nó definido, envia o texto de lembrete |
 
 ## 8. Variáveis do Telegram
 
 - Cada bot tem um `secret_token` próprio: o endpoint `/tg/:id` valida o header
   `X-Telegram-Bot-Api-Secret-Token`, impedindo falsificação de updates.
 - Comandos: `/start` reinicia o fluxo no nó inicial.
+- **Polling local**: bot sem webhook registrado (ex.: rodando na sua máquina sem `BASE_URL`)
+  é atendido por `getUpdates` a cada 2s — funciona sem domínio/HTTPS.
