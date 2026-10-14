@@ -150,7 +150,7 @@ Como usa **polling**, não precisa de domínio, HTTPS nem IP público — basta 
    ```bash
    bash scripts/termux/install.sh
    ```
-   Isso roda `pkg install nodejs` (Node 24, já com `node:sqlite`) e `npm install`.
+   Isso roda `pkg install nodejs` (Node atual do Termux, já com `node:sqlite`) e `npm install`.
 
 3. Preencha o `.env` (o instalador já criou um a partir do exemplo):
    ```bash
@@ -206,8 +206,22 @@ bash scripts/termux/start.sh   # subir de novo
 
 - Os dados (SQLite + uploads) ficam em `~/botmaker/data`.
 - **Instalação travada em `Get: ...` (espelho lento):** o `install.sh` não roda
-  `pkg upgrade` (era o que demorava); ele só atualiza índices e instala Node+git.
+  `pkg upgrade` completo (era o que demorava); ele atualiza índices, atualiza só o
+  `openssl` (exigido pelo Node atual) e instala Node+git.
   Se ainda travar, troque o espelho com `termux-change-repo` e rode de novo.
+- **Erro `CANNOT LINK EXECUTABLE "node": cannot locate symbol "OSSL_PROVIDER_add_conf_parameter"`:**
+  o Node do Termux precisa de OpenSSL atualizado. Rode:
+  ```bash
+  pkg upgrade -y openssl
+  node -v
+  ```
+  Se persistir, atualize tudo e reinstale o Node:
+  ```bash
+  pkg upgrade -y
+  pkg install --reinstall nodejs
+  node -v
+  ```
+  Depois rode `bash scripts/termux/install.sh` de novo.
 - **Android 16:** se o painel não abrir com o Termux em segundo plano, traga o Termux
   para a frente por um instante. Como alternativa, acesse de outro aparelho na mesma
   Wi-Fi: o `start.sh`/log mostra o endereço `http://<ip-do-celular>:3000`.
