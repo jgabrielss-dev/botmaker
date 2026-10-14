@@ -33,8 +33,10 @@ telegram/
 │   └── icon-192.png / icon-512.png
 ├── scripts/
 │   ├── selftest.js             # auto-teste do backend (fetch mockado)
+│   ├── update.sh               # PC/Linux/macOS: git pull + npm install
 │   └── termux/                 # rodar no celular Android
 │       ├── install.sh          # instala Node + dependências
+│       ├── update.sh           # git pull + npm install + reinicia
 │       ├── start.sh            # sobe o painel em segundo plano (wake-lock)
 │       ├── stop.sh             # para o painel
 │       └── enable-autostart.sh # sobe sozinho quando o celular liga
@@ -48,6 +50,51 @@ telegram/
     ├── mercadopago.js    # criação de Pix (/v1/payments) e consulta de status
     ├── poll.js           # polling local (getUpdates) p/ bots sem webhook
     └── jobs.js           # inatividade (15s), sincronia de pagamentos (60s), lembretes (30min)
+```
+
+## 0. Instalar e atualizar (receitas prontas)
+
+Copie e cole conforme o seu aparelho. **Não precisa de domínio, HTTPS nem hospedagem.**
+
+### PC / Linux / macOS
+
+```bash
+# Instalar (primeira vez)
+git clone https://github.com/jgabrielss-dev/botmaker
+cd botmaker
+bash scripts/update.sh          # instala as dependências (npm install)
+npm start                       # abre em http://localhost:3000
+
+# Atualizar depois de novas versões
+bash scripts/update.sh
+```
+
+> No **Windows**, rode esses comandos no **Git Bash** (o PowerShell bloqueia `npm.ps1`;
+> use `npm.cmd install` / `node server/index.js` se preferir). Depois de atualizar, pare
+> o servidor (Ctrl+C) e rode `npm start` de novo.
+
+### Celular Android (Termux) — grátis, roda no próprio aparelho
+
+```bash
+# Instalar (primeira vez) — no Termux
+pkg install -y git
+git clone https://github.com/jgabrielss-dev/botmaker
+cd botmaker
+bash scripts/termux/install.sh  # instala Node + dependências
+nano .env                       # ADMIN_PASSWORD e chaves do Mercado Pago (BASE_URL vazio!)
+bash scripts/termux/start.sh    # sobe em segundo plano
+# abra http://localhost:3000 no navegador do celular
+
+# Atualizar depois de novas versões (baixa, instala e reinicia)
+bash scripts/termux/update.sh
+```
+
+Comandos úteis no celular:
+
+```bash
+tail -f logs/server.log        # log ao vivo
+bash scripts/termux/stop.sh    # parar
+bash scripts/termux/start.sh   # subir de novo
 ```
 
 ## 1. Rodar no PC (teste local)
@@ -219,29 +266,45 @@ processo contínuo + disco.
    - Com `BASE_URL`: o webhook `https://SEU-DOMINIO/tg/{id}` é registrado com secret.
 2. No card do bot, toque em **🔀 Abrir fluxo deste bot**: cada bot tem **um único fluxo**
    (criado automaticamente ao abrir a primeira vez).
-3. Monte os nós:
-   - **ID**: chave do nó (ex.: `inicio`, `pay`, `obrigado`)
+3. Monte os nós. No topo do fluxo você define duas coisas **uma vez só**:
+   - **Nó inicial (/start)**: onde o `/start` cai.
+   - **🛟 Nó de resgate (beco sem saída)**: para onde vai quem ficou sem caminho
+     (fim de linha ou Pix travado). Só **1 por fluxo**.
+   Cada nó (toque para abrir) tem:
+   - **ID**: chave do nó (ex.: `inicio`, `pay`, `obrigado`) — botões usam esse ID
    - **Mensagem**: texto (aceita `<b>`, `<i>`, `<code>`)
    - **Mídias**: *várias* URLs e/ou arquivos do aparelho (📎) — foto/vídeo/pdf/áudio.
      O texto do nó vira legenda da **primeira** mídia; os arquivos locais ficam em
      `DATA_DIR/uploads/` e vão ao Telegram como multipart
-   - **Inatividade (s)**: contagem regressiva de resposta do usuário neste nó
-   - **Nó de retorno**: para onde o cliente vai quando o tempo de inatividade deste nó
-     expira sem resposta (vazio = usar o *próximo nó*).
-   - **Este é o nó da inatividade**: marcador do **fluxo** (só 1). Recebe o cliente
-     quando o fluxo fica **sem caminho** (fim de linha ou Pix travado) — o cron traz pra cá.
+   - **Inatividade (s)**: tempo de espera de resposta **neste nó**
+   - **Se o cliente ficar parado, ir para** (nó de retorno): destino quando o tempo
+     acima expira sem resposta (vazio = usar o *próximo nó*)
    - **Valor Pix**: `> 0` trava o nó e gera o Pix Copia e Cola + QR Code
-   - **Botões inline**: cada botão leva ao nó escolhido
    - **Próximo nó**: usado quando não há botão (ou depois do pagamento aprovado)
-   - **Mensagem de lembrete**: texto enviado pela régua **só quando o fluxo não tem pra
-     onde levar o cliente** e não há nó da inatividade marcado
+   - **Botões inline**: cada botão leva ao nó escolhido (botões **sem destino** ficam
+     vermelhos e bloqueiam a ativação — no Telegram eles simplesmente somem)
+   - **Mensagem de lembrete**: enviada pela régua **só quando não há** nó de retorno nem
+     nó de resgate
    - **Convite de uso único**: grupo (aba 📢 Grupos) cujo link de **1 pessoa só**
      (`member_limit=1`) é enviado **depois** da mensagem deste nó
-   - Defina o **nó inicial** no topo e toque em **Ativar**.
+   - **Pré-visualização**: mostra a bolha como o cliente vê (texto + botões + mídias).
+   No fim do fluxo há **＋ Adicionar nó**, **↑/↓** (reordenar), **⧉** (duplicar) e **⬇/⬆**
+   (exportar/importar o fluxo em JSON — bom para backup). Ao tocar em **Ativar**, o painel
+   **valida** o fluxo (nós sem destino, destinos inexistentes, Pix sem saída…) e mostra o
+   que corrigir antes de publicar.
 4. **Aba Grupos**: cadastre os grupos onde o bot é **administrador** (com permissão de
-   "adicionar membros") — validados via `getChatMember`.
-5. **Aba Clientes**: veja em que nó cada usuário está (Ativo / Aguardando Pix / Concluído).
-6. **Aba Pix**: histórico de pagamentos com status.
+   "adicionar membros"). Toque em **Descobrir** para listar os grupos que o bot **já viu**
+   e usar o ID com um toque (para o bot ver o grupo: desative o *modo privacidade* no
+   @BotFather com `/setprivacy` e mande uma mensagem no grupo).
+5. **Aba Clientes**: busca por nome/@usuário/ID; mostra o **nome** do cliente (não só o
+   número), o bot, o nó atual e o status (Ativo / Aguardando Pix / Concluído). Cada cliente
+   tem **↻ Reiniciar** (volta ao nó inicial), **🔓 Liberar** (destrava um Pix na mão) e **🗑**
+   (remove do painel, sem afetar o Telegram).
+6. **Aba Pix**: total **aprovado** e **pendente** no topo, filtro por status e histórico.
+7. **⚙️ Status** (no topo): modo (polling/webhook), `BASE_URL`, Mercado Pago, senha do
+   painel, pasta de dados, versão do Node, tempo ligado, contagem de bots/clientes/Pix e
+   **avisos** (ex.: polling parado por conflito de `getUpdates`).
+8. **❓ Ajuda** (no topo): explica nós, Pix, inatividade e convites em 1 minuto.
 
 ## 6. Mercado Pago — pagamentos
 

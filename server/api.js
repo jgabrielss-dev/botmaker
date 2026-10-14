@@ -104,6 +104,12 @@ router.get('/status', (req, res) => {
 });
 
 /* ---------- Bots ---------- */
+function publicBot(bot) {
+  if (!bot) return bot;
+  const { token, secret, ...rest } = bot;
+  return rest;
+}
+
 function flowNodeCount(bot) {
   if (!bot.flow_id) return 0;
   const row = db.prepare('SELECT data FROM flows WHERE id = ?').get(bot.flow_id);
@@ -117,7 +123,7 @@ function flowNodeCount(bot) {
 
 router.get('/bots', (req, res) => {
   const rows = db.prepare('SELECT * FROM bots ORDER BY id DESC').all();
-  res.json(rows.map((b) => ({ ...b, nodes: flowNodeCount(b) })));
+  res.json(rows.map((b) => ({ ...publicBot(b), nodes: flowNodeCount(b) })));
 });
 
 router.post('/bots', async (req, res) => {
@@ -150,15 +156,15 @@ router.post('/bots', async (req, res) => {
   if (!/^https:\/\//.test(baseUrl)) {
     // Modo celular / sem URL publica: garante que o bot use polling local.
     await tg.deleteWebhook(bot).catch(() => {});
-    return res.json({ ...E.getBot(id), mode: 'polling' });
+    return res.json({ ...publicBot(E.getBot(id)), mode: 'polling' });
   }
   try {
     const url = await tg.setWebhook(bot, baseUrl);
     db.prepare('UPDATE bots SET webhook_url = ? WHERE id = ?').run(url, id);
   } catch (e) {
-    return res.json({ ...E.getBot(id), warning: 'Bot salvo, mas webhook falhou: ' + e.message });
+    return res.json({ ...publicBot(E.getBot(id)), warning: 'Bot salvo, mas webhook falhou: ' + e.message });
   }
-  res.json(E.getBot(id));
+  res.json(publicBot(E.getBot(id)));
 });
 
 router.delete('/bots/:id', async (req, res) => {
