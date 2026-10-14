@@ -44,6 +44,7 @@ const path = require('path');
 const express = require('express');
 const api = require('./api');
 const db = require('./db');
+const auth = require('./auth');
 const E = require('./engine');
 const { startJobs } = require('./jobs');
 const { startPolling } = require('./poll');
@@ -55,7 +56,16 @@ const BASE_URL = (process.env.BASE_URL || '').replace(/\/+$/, '');
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
-app.use('/uploads', express.static(path.join(db.DATA_DIR, 'uploads')));
+
+/* Uploads exigem sessao (nao sao mais estaticos publicos). Arquivos sao servidos
+   por nome aleatorio, mas ainda assim ficam atras do login. */
+app.get('/uploads/:file', auth.requireAuth, (req, res) => {
+  const file = path.basename(String(req.params.file || ''));
+  if (!file || file.startsWith('.')) return res.sendStatus(400);
+  res.sendFile(path.join(db.DATA_DIR, 'uploads', file), (err) => {
+    if (err) res.sendStatus(404);
+  });
+});
 
 /* Webhook do Telegram - um endpoint por bot */
 app.post('/tg/:botId', async (req, res) => {

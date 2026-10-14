@@ -298,6 +298,43 @@ global.fetch = async (url, opts) => {
   assert.ok(orderOk >= 0 && invIndex > orderOk, 'conteudo do no antes do convite');
   console.log('16. convite de uso unico enviado depois do conteudo OK');
 
+  // 17) nome do cliente e chat visto sao gravados (aba Clientes)
+  const from17 = { id: 2000, first_name: 'Ana', last_name: 'Souza', username: 'ana_x' };
+  await E.handleUpdate(E.getBot(botId), {
+    message: { chat: { id: 2000, type: 'private', first_name: 'Ana' }, from: from17, text: '/start' }
+  });
+  const c17 = db.prepare('SELECT * FROM clients WHERE bot_id = ? AND chat_id = ?').get(botId, '2000');
+  assert.strictEqual(c17.first_name, 'Ana');
+  assert.strictEqual(c17.username, 'ana_x');
+  assert.ok(c17.last_seen > 0, 'last_seen deveria ser gravado');
+  const chat17 = db.prepare('SELECT * FROM bot_chats WHERE bot_id = ? AND chat_id = ?').get(botId, '2000');
+  assert.ok(chat17 && chat17.title === 'Ana Souza', 'chat visto gravado: ' + (chat17 && chat17.title));
+  console.log('17. identidade do cliente + chats vistos OK');
+
+  // 18) acao manual do painel: reiniciar o cliente volta para o no inicial
+  await E.restartClient(botId, 2000);
+  const c18 = E.getClient(botId, 2000);
+  const flowNow = JSON.parse(db.prepare('SELECT data FROM flows WHERE id = ?').get(E.getBot(botId).flow_id).data);
+  assert.strictEqual(c18.node_key, flowNow.start);
+  assert.strictEqual(c18.status, 'active');
+  console.log('18. acao manual "reiniciar" OK');
+
+  // 19) acao manual "desbloquear" libera o pagamento e avanca
+  db.prepare("UPDATE clients SET status = 'waiting_payment', node_key = 'conv' WHERE id = ?").run(c18.id);
+  db.prepare('UPDATE flows SET data = ? WHERE id = ?').run(
+    JSON.stringify({ start: 'pago', order: ['pago', 'depois'], nodes: {
+      pago: { text: 'Pague', price: 9.9, wait: 0, buttons: [], next: 'depois' },
+      depois: { text: 'Liberado', price: 0, wait: 0, buttons: [], next: '' }
+    } }),
+    E.getBot(botId).flow_id
+  );
+  db.prepare("UPDATE clients SET node_key = 'pago' WHERE id = ?").run(c18.id);
+  await E.unlockClient(botId, 2000);
+  const c19 = E.getClient(botId, 2000);
+  assert.strictEqual(c19.node_key, 'depois', 'desbloquear deveria avancar para o proximo no');
+  assert.strictEqual(c19.status, 'active');
+  console.log('19. acao manual "desbloquear" OK');
+
   console.log('\nTODOS OS TESTES PASSARAM');
   process.exit(0);
 })().catch((e) => {

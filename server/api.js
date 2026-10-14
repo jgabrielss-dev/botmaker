@@ -6,6 +6,7 @@ const db = require('./db');
 const auth = require('./auth');
 const tg = require('./telegram');
 const E = require('./engine');
+const poll = require('./poll');
 
 const router = express.Router();
 
@@ -78,10 +79,45 @@ router.use(auth.requireAuth);
 
 router.get('/me', (req, res) => res.json({ ok: true }));
 
+/* ---------- Status do sistema ---------- */
+router.get('/status', (req, res) => {
+  const pending = db.prepare("SELECT COUNT(*) c FROM payments WHERE status = 'pending'").get().c;
+  const approved = db.prepare("SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM payments WHERE status = 'approved'").get();
+  const clients = db.prepare('SELECT COUNT(*) c FROM clients').get().c;
+  const bots = db.prepare('SELECT id, name, webhook_url FROM bots ORDER BY id').all();
+  res.json({
+    ok: true,
+    mode: /^https:\/\//.test(process.env.BASE_URL || '') ? 'webhook' : 'polling',
+    baseUrl: process.env.BASE_URL || null,
+    dataDir: db.DATA_DIR,
+    node: process.version,
+    uptime: Math.round(process.uptime()),
+    mpToken: (process.env.MERCADO_PAGO_ACCESS_TOKEN || '').startsWith('[cole')
+      ? 'placeholder'
+      : !!process.env.MERCADO_PAGO_ACCESS_TOKEN,
+    adminPassword: !!process.env.ADMIN_PASSWORD,
+    passwordIssues: auth.passwordIssues(),
+    bots: bots.map((b) => ({ id: b.id, name: b.name, webhook: !!b.webhook_url })),
+    polling: poll.status(),
+    counts: { clients, pendingPayments: pending, approvedPayments: approved.c, approvedSum: approved.s }
+  });
+});
+
 /* ---------- Bots ---------- */
+function flowNodeCount(bot) {
+  if (!bot.flow_id) return 0;
+  const row = db.prepare('SELECT data FROM flows WHERE id = ?').get(bot.flow_id);
+  if (!row) return 0;
+  try {
+    return Object.keys(JSON.parse(row.data || '{}').nodes || {}).length;
+  } catch (e) {
+    return 0;
+  }
+}
+
 router.get('/bots', (req, res) => {
   const rows = db.prepare('SELECT * FROM bots ORDER BY id DESC').all();
-  res.json(rows);
+  res.json(rows.map((b) => ({ ...b, nodes: flowNodeCount(b) })));
 });
 
 router.post('/bots', async (req, res) => {
@@ -129,8 +165,13 @@ router.delete('/bots/:id', async (req, res) => {
   const bot = E.getBot(Number(req.params.id));
   if (!bot) return res.status(404).json({ error: 'Bot não encontrado' });
   await tg.deleteWebhook(bot).catch(() => {});
-  db.prepare('DELETE FROM bots WHERE id = ?').run(bot.id);
+  // remove tudo que pertence a este bot (sem linhas orfas)
   db.prepare('DELETE FROM clients WHERE bot_id = ?').run(bot.id);
+  db.prepare('DELETE FROM flows WHERE bot_id = ?').run(bot.id);
+  db.prepare('DELETE FROM groups WHERE bot_id = ?').run(bot.id);
+  db.prepare('DELETE FROM payments WHERE bot_id = ?').run(bot.id);
+  db.prepare('DELETE FROM bot_chats WHERE bot_id = ?').run(bot.id);
+  db.prepare('DELETE FROM bots WHERE id = ?').run(bot.id);
   res.json({ ok: true });
 });
 
@@ -235,6 +276,31 @@ router.get('/clients', (req, res) => {
   res.json(rows);
 });
 
+/* Acoes manuais sobre um cliente (reiniciar / desbloquear / excluir) */
+router.post('/clients/:id/action', async (req, res) => {
+  const id = Number(req.params.id);
+  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
+  if (!client) return res.status(404).json({ error: 'Cliente não encontrado' });
+  const action = String((req.body && req.body.action) || '');
+  try {
+    if (action === 'restart') {
+      await E.restartClient(client.bot_id, client.chat_id);
+      return res.json({ ok: true });
+    }
+    if (action === 'unlock') {
+      await E.unlockClient(client.bot_id, client.chat_id);
+      return res.json({ ok: true });
+    }
+    if (action === 'delete') {
+      db.prepare('DELETE FROM clients WHERE id = ?').run(id);
+      return res.json({ ok: true });
+    }
+    return res.status(400).json({ error: 'Ação inválida' });
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+});
+
 router.get('/payments', (req, res) => {
   const rows = db
     .prepare(
@@ -242,6 +308,21 @@ router.get('/payments', (req, res) => {
     )
     .all();
   res.json(rows);
+});
+
+router.get('/payments/summary', (req, res) => {
+  const rows = db
+    .prepare('SELECT status, COUNT(*) c, COALESCE(SUM(amount),0) total FROM payments GROUP BY status')
+    .all();
+  const out = { approved: { count: 0, total: 0 }, pending: { count: 0, total: 0 } };
+  let count = 0;
+  let total = 0;
+  for (const r of rows) {
+    out[r.status] = { count: r.c, total: r.total };
+    count += r.c;
+    total += r.total;
+  }
+  res.json({ statuses: out, all: { count, total } });
 });
 
 /* ---------- Grupos (convites de uso unico) ---------- */
@@ -284,6 +365,17 @@ router.post('/groups', async (req, res) => {
 router.delete('/groups/:id', (req, res) => {
   const info = db.prepare('DELETE FROM groups WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true, removed: info.changes });
+});
+
+/* Chats/grupos que o bot ja viu (para descobrir IDs sem digitar na mao) */
+router.get('/bots/:id/chats', (req, res) => {
+  const bot = E.getBot(Number(req.params.id));
+  if (!bot) return res.status(404).json({ error: 'Bot não encontrado' });
+  const type = req.query.type ? String(req.query.type) : null;
+  const rows = type
+    ? db.prepare('SELECT * FROM bot_chats WHERE bot_id = ? AND type = ? ORDER BY updated_at DESC LIMIT 100').all(bot.id, type)
+    : db.prepare('SELECT * FROM bot_chats WHERE bot_id = ? ORDER BY updated_at DESC LIMIT 100').all(bot.id);
+  res.json(rows);
 });
 
 /* ---------- Upload de midia local (arquivo do aparelho) ---------- */

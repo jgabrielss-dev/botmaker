@@ -44,6 +44,26 @@ function updateClient(id, fields) {
   db.prepare(sql).run(...keys.map((k) => fields[k]), id);
 }
 
+/* Guarda o chat que o bot viu (para descobrir grupos/IDs sem digitar na mao). */
+function touchChat(bot, chat, from) {
+  if (!bot || !chat || !chat.id) return;
+  const f = from || {};
+  const name = [f.first_name, f.last_name].filter(Boolean).join(' ').trim();
+  const title = chat.title || name || chat.username || String(chat.id);
+  const username = chat.username || f.username || '';
+  try {
+    db.prepare(
+      `INSERT INTO bot_chats (bot_id, chat_id, type, title, username, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(bot_id, chat_id) DO UPDATE SET
+         type = excluded.type, title = excluded.title,
+         username = excluded.username, updated_at = excluded.updated_at`
+    ).run(bot.id, String(chat.id), chat.type || 'private', title, username, Date.now());
+  } catch (e) {
+    /* nao deixa a captura do chat derrubar o fluxo */
+  }
+}
+
 async function safeReply(bot, chatId, text, keyboard) {
   try {
     await tg.sendText(bot.token, chatId, text, keyboard);
@@ -192,6 +212,18 @@ async function handleUpdate(bot, update) {
     const client = getClient(bot.id, chatId);
     const flow = getFlow(bot);
 
+    const from = msg.from || {};
+    touchChat(bot, msg.chat, from);
+    if (from.id) {
+      updateClient(client.id, {
+        first_name: from.first_name || '',
+        last_name: from.last_name || '',
+        username: from.username || '',
+        last_seen: Date.now(),
+        updated_at: Date.now()
+      });
+    }
+
     if (!flow) {
       return safeReply(bot, chatId, '⚠️ Nenhum fluxo configurado para este bot ainda.');
     }
@@ -222,6 +254,7 @@ async function handleUpdate(bot, update) {
   if (update.callback_query) {
     const cq = update.callback_query;
     const chatId = cq.message ? cq.message.chat.id : (cq.from && cq.from.id);
+    touchChat(bot, cq.message ? cq.message.chat : { id: chatId, type: 'private' }, cq.from);
     const data = cq.data || '';
     try {
       await tg.call('answerCallbackQuery', { callback_query_id: cq.id }, bot.token);
@@ -251,16 +284,45 @@ async function onPaymentApprovedByClient(bot, client, flow) {
   await advance(bot, client, flow, node ? node.next : null);
 }
 
+/* ------------- Acoes manuais do painel sobre um cliente ------------- */
+
+async function restartClient(botId, chatId) {
+  const bot = getBot(botId);
+  if (!bot) return false;
+  const flow = getFlow(bot);
+  if (!flow) return false;
+  const client = getClient(botId, chatId);
+  updateClient(client.id, { status: 'active', payment_id: null, last_reminder: Date.now(), updated_at: Date.now() });
+  const fresh = getClient(botId, chatId);
+  await enterNode(bot, fresh, flow, flow.json.start);
+  return true;
+}
+
+async function unlockClient(botId, chatId) {
+  const bot = getBot(botId);
+  if (!bot) return false;
+  const flow = getFlow(bot);
+  const client = getClient(botId, chatId);
+  const node = getNode(flow, client.node_key);
+  updateClient(client.id, { status: 'active', payment_id: null, updated_at: Date.now() });
+  // segue como se o pagamento tivesse sido aprovado
+  await advance(bot, client, flow, node ? node.next : null);
+  return true;
+}
+
 module.exports = {
   getBot,
   getFlow,
   getNode,
   getClient,
   updateClient,
+  touchChat,
   enterNode,
   advance,
   handleUpdate,
   onPaymentApproved,
   recheckPayment,
+  restartClient,
+  unlockClient,
   PIX_TTL
 };

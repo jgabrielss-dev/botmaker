@@ -6,6 +6,7 @@ const tg = require('./telegram');
 
 const offsets = new Map();
 const running = new Set();
+const problems = new Map();
 let enabled = true;
 let timer = null;
 
@@ -13,6 +14,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function pollable(bot) {
   return enabled && bot && !bot.webhook_url;
+}
+
+function status() {
+  return {
+    enabled,
+    running: Array.from(running),
+    problems: Array.from(problems.entries()).map(([id, reason]) => ({ id, reason }))
+  };
 }
 
 async function loop(bot) {
@@ -41,9 +50,11 @@ async function loop(bot) {
     } catch (e) {
       const desc = e.description || e.message || '';
       if (/409|conflict|terminated by other/i.test(desc)) {
+        problems.set(still.id, 'Outra instância já chama getUpdates (ou webhook ativo). Polling parado para este bot.');
         console.warn(`Polling desativado para o bot ${still.id}: outra instancia ja chama getUpdates (ou webhook ativo).`);
         break;
       }
+      problems.set(still.id, desc);
       console.error('polling error bot=' + still.id, desc);
       await sleep(5000);
     }
@@ -61,6 +72,7 @@ function tick() {
   for (const bot of bots) {
     if (running.has(bot.id)) continue;
     running.add(bot.id);
+    problems.delete(bot.id);
     console.log(`Bot ${bot.id} (${bot.name}) em modo polling local (sem webhook).`);
     loop(bot).finally(() => running.delete(bot.id));
   }
@@ -79,4 +91,4 @@ function stopPolling() {
   timer = null;
 }
 
-module.exports = { startPolling, stopPolling, tick, pollable };
+module.exports = { startPolling, stopPolling, tick, pollable, status };

@@ -98,7 +98,35 @@ CREATE TABLE IF NOT EXISTS groups (
   created_at INTEGER NOT NULL DEFAULT 0,
   UNIQUE(bot_id, chat_id)
 );
+
+/* Chats que o bot ja viu (para descobrir grupos/IDs sem digitar na mao). */
+CREATE TABLE IF NOT EXISTS bot_chats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bot_id INTEGER NOT NULL,
+  chat_id TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  username TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(bot_id, chat_id)
+);
 `);
+
+/* ---------- Migracoes leves (colunas novas em bancos ja existentes) ---------- */
+function hasColumn(table, column) {
+  try {
+    return db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  } catch (e) {
+    return false;
+  }
+}
+function addColumn(table, column, ddl) {
+  if (!hasColumn(table, column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+addColumn('clients', 'first_name', "first_name TEXT NOT NULL DEFAULT ''");
+addColumn('clients', 'last_name', "last_name TEXT NOT NULL DEFAULT ''");
+addColumn('clients', 'username', "username TEXT NOT NULL DEFAULT ''");
+addColumn('clients', 'last_seen', 'last_seen INTEGER NOT NULL DEFAULT 0');
 
 db.DATA_DIR = DATA_DIR;
 module.exports = db;
