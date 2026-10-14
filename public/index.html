@@ -450,7 +450,7 @@ function renderStatus() {
     row('Pix aprovados', s.counts.approvedPayments + ' (' + fmtMoney(s.counts.approvedSum) + ')') +
     row('Bots em polling', s.polling.enabled ? (s.polling.running.length + '') : 'desativado') +
     (problems.length ? `<div class="mt-3 p-3 rounded-xl bg-red-900/40 border border-red-800 text-xs text-red-200">${problems.map((p) => '⚠ ' + esc(p.reason)).join('<br>')}</div>` : '') +
-    (s.passwordIssues && s.passwordIssues.length ? `<div class="mt-3 p-3 rounded-xl bg-amber-900/30 border border-amber-800 text-xs text-amber-200">Senha do painel: ${esc(s.passwordIssues.join(', '))}</div>` : '');
+    (s.warnings && s.warnings.length ? `<div class="mt-3 p-3 rounded-xl bg-amber-900/30 border border-amber-800 text-xs text-amber-200">${s.warnings.map((w) => '⚠ ' + esc(w)).join('<br>')}</div>` : '');
 }
 $('#btnStatus').addEventListener('click', async () => { await loadStatus(); renderStatus(); $('#statusSheet').classList.add('open'); });
 $('#statusBack').addEventListener('click', () => $('#statusSheet').classList.remove('open'));

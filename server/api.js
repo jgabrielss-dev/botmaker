@@ -37,43 +37,28 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+/* Health-check publico e MINIMO (Railway/Render usam so para saber se subiu).
+   Os detalhes de configuracao ficam em /api/status, que exige login. */
 router.get('/health', (req, res) => {
-  const dataDir = process.env.DATA_DIR || '';
-  // Considera absoluto tambem no Windows (C:\... ou \\ UNC), nao so no Unix (/...).
-  const dataDirAbsolute = /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(dataDir);
-  return res.json({
-    ok: true,
-    mode: /^https:\/\//.test(process.env.BASE_URL || '') ? 'webhook' : 'polling (celular/sem URL publica)',
-    dataDir: process.env.DATA_DIR || '(padrao)',
-    baseUrl: process.env.BASE_URL || null,
-    adminPassword: !!process.env.ADMIN_PASSWORD,
-    mpToken: (process.env.MERCADO_PAGO_ACCESS_TOKEN || '').startsWith('[cole') ? 'placeholder' : !!process.env.MERCADO_PAGO_ACCESS_TOKEN,
-    bots: db.prepare('SELECT COUNT(*) c FROM bots').get().c,
-    flows: db.prepare('SELECT COUNT(*) c FROM flows').get().c,
-    debug: {
-      node: process.version,
-      railway: process.env.RAILWAY_ENVIRONMENT || null,
-      service: process.env.RAILWAY_SERVICE_NAME || null,
-      envCount: Object.keys(process.env).length,
-      found: ['ADMIN_PASSWORD', 'BASE_URL', 'MERCADO_PAGO_ACCESS_TOKEN', 'MERCADO_PAGO_PUBLIC_KEY', 'DATA_DIR'].filter(
-        (k) => process.env[k] !== undefined
-      )
-    },
-    warnings: [
-      ...auth.passwordIssues().map((i) => 'ADMIN_PASSWORD: ' + i),
-      process.env.BASE_URL && /xxx\.|exemplo|example/i.test(process.env.BASE_URL)
-        ? 'BASE_URL parece ser o texto de exemplo, troque pelo dominio real'
-        : null,
-      process.env.BASE_URL && !/^https:\/\//.test(process.env.BASE_URL) ? 'BASE_URL precisa comecar com https://' : null,
-      dataDir && !dataDirAbsolute
-        ? `DATA_DIR="${dataDir}" e relativa: os dados sao apagados a cada deploy (use /data com volume)`
-        : null,
-      dataDir.startsWith('/') && dataDir !== '/data'
-        ? `DATA_DIR="${dataDir}" (o volume costuma ser /data, minusculo)`
-        : null
-    ].filter(Boolean)
-  });
+  res.json({ ok: true, mode: /^https:\/\//.test(process.env.BASE_URL || '') ? 'webhook' : 'polling' });
 });
+
+/* Avisos de configuracao (mostrados na tela de Status, autenticada). */
+function envWarnings() {
+  const dataDir = process.env.DATA_DIR || '';
+  const dataDirAbsolute = /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(dataDir);
+  return [
+    ...auth.passwordIssues().map((i) => 'ADMIN_PASSWORD: ' + i),
+    process.env.BASE_URL && /xxx\.|exemplo|example/i.test(process.env.BASE_URL)
+      ? 'BASE_URL parece ser o texto de exemplo, troque pelo dominio real'
+      : null,
+    process.env.BASE_URL && !/^https:\/\//.test(process.env.BASE_URL) ? 'BASE_URL precisa comecar com https://' : null,
+    dataDir && !dataDirAbsolute
+      ? `DATA_DIR="${dataDir}" e relativa: os dados sao apagados a cada deploy (use /data com volume)`
+      : null,
+    dataDir.startsWith('/') && dataDir !== '/data' ? `DATA_DIR="${dataDir}" (o volume costuma ser /data, minusculo)` : null
+  ].filter(Boolean);
+}
 
 router.use(auth.requireAuth);
 
@@ -97,6 +82,7 @@ router.get('/status', (req, res) => {
       : !!process.env.MERCADO_PAGO_ACCESS_TOKEN,
     adminPassword: !!process.env.ADMIN_PASSWORD,
     passwordIssues: auth.passwordIssues(),
+    warnings: envWarnings(),
     bots: bots.map((b) => ({ id: b.id, name: b.name, webhook: !!b.webhook_url })),
     polling: poll.status(),
     counts: { clients, pendingPayments: pending, approvedPayments: approved.c, approvedSum: approved.s }
