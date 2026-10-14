@@ -67,6 +67,24 @@ function touchChat(bot, chat, from) {
   }
 }
 
+/* Quando um grupo vira supergrupo o ID muda. Move clientes/chats do ID antigo
+   para o novo (senao o bot tenta responder num ID que nao existe mais). */
+function migrateChatId(botId, from, to) {
+  if (!from || !to || String(from) === String(to)) return;
+  for (const table of ['bot_chats', 'clients']) {
+    try {
+      db.prepare(`UPDATE ${table} SET chat_id = ? WHERE bot_id = ? AND chat_id = ?`).run(String(to), botId, String(from));
+    } catch (e) {
+      // ja existe uma linha com o ID novo (conflito de unicidade): descarta a antiga
+      try {
+        db.prepare(`DELETE FROM ${table} WHERE bot_id = ? AND chat_id = ?`).run(botId, String(from));
+      } catch (e2) {
+        /* ignora */
+      }
+    }
+  }
+}
+
 async function safeReply(bot, chatId, text, keyboard) {
   try {
     await tg.sendText(bot.token, chatId, text, keyboard);
@@ -230,6 +248,20 @@ async function handleUpdate(bot, update) {
   if (update.message) {
     const msg = update.message;
     const chatId = msg.chat.id;
+
+    // grupo virou supergrupo: o ID muda. Migra os registros e encerra.
+    if (msg.migrate_to_chat_id) {
+      migrateChatId(bot.id, chatId, msg.migrate_to_chat_id);
+      return;
+    }
+
+    // O fluxo e o Pix sao 1:1. Em grupo/canal apenas registramos o chat (aba Descobrir)
+    // e NAO respondemos, para nao gerar "not enough rights".
+    if (msg.chat.type && msg.chat.type !== 'private') {
+      touchChat(bot, msg.chat, msg.from);
+      return;
+    }
+
     const text = (msg.text || '').trim();
     const client = getClient(bot.id, chatId);
     const flow = getFlow(bot);
@@ -279,12 +311,15 @@ async function handleUpdate(bot, update) {
 
   if (update.callback_query) {
     const cq = update.callback_query;
-    const chatId = cq.message ? cq.message.chat.id : (cq.from && cq.from.id);
-    touchChat(bot, cq.message ? cq.message.chat : { id: chatId, type: 'private' }, cq.from);
+    const chat = cq.message ? cq.message.chat : null;
+    const chatId = chat ? chat.id : (cq.from && cq.from.id);
+    touchChat(bot, chat || { id: chatId, type: 'private' }, cq.from);
     const data = cq.data || '';
     try {
       await tg.call('answerCallbackQuery', { callback_query_id: cq.id }, bot.token);
     } catch (e) {}
+    // botoes clicados em grupo/canal sao ignorados (o fluxo e 1:1)
+    if (chat && chat.type && chat.type !== 'private') return;
     if (!data.startsWith('go:')) return;
 
     const toKey = data.slice(3);

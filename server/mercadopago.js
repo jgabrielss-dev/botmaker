@@ -22,7 +22,17 @@ async function createPixPayment({ amount, description, externalReference, notifi
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error('Mercado Pago: ' + (data.message || res.status) + ' ' + JSON.stringify(data.cause || ''));
+    const detail = JSON.stringify(data.cause || '');
+    const liveCred = data.code === 7 || /live credentials/i.test(JSON.stringify(data));
+    if (liveCred) {
+      throw new Error(
+        'Mercado Pago recusou as credenciais (Unauthorized use of live credentials). ' +
+          'Use o Access Token de PRODUCAO de uma conta REAL (comeca com APP_USR-) em ' +
+          'MERCADO_PAGO_ACCESS_TOKEN. Tokens de usuario de teste, ou app sem "producao" ' +
+          'ativada, nao geram Pix de verdade. Veja o README, secao 3.'
+      );
+    }
+    throw new Error('Mercado Pago: ' + (data.message || res.status) + ' ' + detail);
   }
   const tx = (data.point_of_interaction && data.point_of_interaction.transaction_data) || {};
   return {

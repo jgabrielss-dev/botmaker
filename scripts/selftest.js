@@ -369,6 +369,39 @@ global.fetch = async (url, opts) => {
   assert.strictEqual(db.prepare('SELECT status FROM payments WHERE id = ?').get(pay20.lastInsertRowid).status, 'approved');
   console.log('20. job de 60s destrava o Pix aprovado (regressao do bug critico) OK');
 
+  // 21) mensagem de grupo NAO roda o fluxo (evita "not enough rights")
+  const before21 = calls.length;
+  await E.handleUpdate(E.getBot(botId), {
+    message: { chat: { id: -100999, type: 'supergroup', title: 'Grupo X' }, from: { id: 1 }, text: 'oi' }
+  });
+  const sent21 = calls.slice(before21).filter((x) => x.url.includes('sendMessage') || x.url.includes('sendPhoto'));
+  assert.strictEqual(sent21.length, 0, 'nao deveria responder em grupo');
+  assert.ok(!db.prepare('SELECT * FROM clients WHERE bot_id = ? AND chat_id = ?').get(botId, '-100999'), 'nao deveria criar cliente para grupo');
+  assert.ok(db.prepare('SELECT * FROM bot_chats WHERE bot_id = ? AND chat_id = ?').get(botId, '-100999'), 'mas deveria registrar o grupo (aba Descobrir)');
+  console.log('21. mensagem de grupo e ignorada (so registra o chat) OK');
+
+  // 22) grupo -> supergrupo migra o chat_id armazenado
+  await E.handleUpdate(E.getBot(botId), {
+    message: { chat: { id: -100999, type: 'supergroup', title: 'Grupo X' }, from: { id: 1 }, migrate_to_chat_id: -1001234567890 }
+  });
+  assert.ok(db.prepare('SELECT * FROM bot_chats WHERE bot_id = ? AND chat_id = ?').get(botId, '-1001234567890'), 'chat deveria migrar para o ID novo');
+  assert.ok(!db.prepare('SELECT * FROM bot_chats WHERE bot_id = ? AND chat_id = ?').get(botId, '-100999'), 'ID antigo nao deveria permanecer');
+  console.log('22. upgrade grupo->supergrupo migra o chat_id OK');
+
+  // 23) erro de credencial do Mercado Pago vira mensagem que orienta o operador
+  const mp = require('../server/mercadopago');
+  const realFetch = global.fetch;
+  global.fetch = async () => ({ ok: false, status: 401, json: async () => ({ code: 7, message: 'Unauthorized use of live credentials' }) });
+  let msg23 = '';
+  try {
+    await mp.createPixPayment({ amount: 1, description: 'x', externalReference: 'e' });
+  } catch (e) {
+    msg23 = e.message;
+  }
+  global.fetch = realFetch;
+  assert.ok(/PRODUCAO|APP_USR/i.test(msg23), 'mensagem deveria orientar sobre credenciais: ' + msg23);
+  console.log('23. erro de credencial do Mercado Pago com instrucao OK');
+
   console.log('\nTODOS OS TESTES PASSARAM');
   process.exit(0);
 })().catch((e) => {

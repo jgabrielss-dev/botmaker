@@ -354,6 +354,17 @@ processo contínuo + disco.
   pagamentos que o próprio sistema criou.
 - Quando o status chega como `approved`, o usuário é desbloqueado e avança para o próximo nó.
 
+**Se aparecer `Unauthorized use of live credentials` (código 7):** o token usado não é
+uma credencial de produção válida. Confira em **Mercado Pago → Suas integrações → sua
+aplicação → Credenciais de produção** e use o **Access Token que começa com `APP_USR-`**
+de uma **conta real** (não de usuário de teste). Um app sem "produção" ativada ou um token
+de usuário de teste não gera Pix de verdade.
+
+**Se aparecer `not enough rights to send text messages` ou `group chat was upgraded to a
+supergroup`:** o bot recebeu mensagem num **grupo/canal**. O fluxo e o Pix são **1:1**, então
+o bot **ignora grupos** (apenas registra o grupo na aba **Descobrir**) — se um grupo virou
+supergrupo, o ID é migrado automaticamente. Nenhuma ação necessária.
+
 ## 7. Comportamentos automáticos (jobs)
 
 | Job | Intervalo | O que faz |
