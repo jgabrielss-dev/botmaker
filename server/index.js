@@ -1,15 +1,45 @@
+/* Painel de Bots Telegram - servidor Express.
+
+   Roda em qualquer host com Node >= 22.5 (usa o modulo nativo node:sqlite)
+   E tambem DENTRO do celular Android (Termux), sem precisar de URL publica:
+   sem BASE_URL o Telegram entra em modo polling (getUpdates) e o Pix e
+   confirmado pelo job de 60s. Veja o README, secao "Rodar no celular". */
+
+/* 1) Versao minima do Node (o modulo node:sqlite entrou no 22.5) */
 {
   const [maj, min] = process.versions.node.split('.').map(Number);
   if (maj < 22 || (maj === 22 && min < 5)) {
     console.error(
       `ERRO: Node ${process.versions.node} detectado. Este projeto exige Node >= 22.5 (usa o modulo nativo node:sqlite). ` +
-        `Configure a variavel NODE_VERSION=22.5 ou superior nas variaveis do hospedeiro.`
+        `No celular (Termux) rode: pkg install nodejs`
     );
     process.exit(1);
   }
 }
 
+/* 2) O node:sqlite saiu de tras da flag --experimental-sqlite no Node 22.13 / 23.4.
+      Em versoes 22.5-22.12 reexecutamos automaticamente com a flag. */
+{
+  let ok = true;
+  try {
+    require('node:sqlite');
+  } catch (e) {
+    ok = false;
+  }
+  if (!ok) {
+    if (process.env.__SQLITE_REEXEC === '1' || process.execArgv.includes('--experimental-sqlite')) {
+      console.error('ERRO: modulo node:sqlite indisponivel. Atualize o Node (>= 22.13) ou rode com --experimental-sqlite.');
+      process.exit(1);
+    }
+    const { spawnSync } = require('child_process');
+    const args = [...process.execArgv, '--experimental-sqlite', __filename, ...process.argv.slice(2)];
+    const r = spawnSync(process.execPath, args, { stdio: 'inherit', env: { ...process.env, __SQLITE_REEXEC: '1' } });
+    process.exit(r.status == null ? 1 : r.status);
+  }
+}
+
 require('dotenv').config();
+const os = require('os');
 const path = require('path');
 const express = require('express');
 const api = require('./api');
@@ -20,6 +50,7 @@ const { startPolling } = require('./poll');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BASE_URL = (process.env.BASE_URL || '').replace(/\/+$/, '');
 
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
@@ -59,10 +90,34 @@ app.use('/api', api);
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
+/* Enderecos da rede local (uteis para abrir o painel de outro aparelho) */
+function lanUrls(port) {
+  const out = [];
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const ni of ifaces[name] || []) {
+      if (ni.family === 'IPv4' && !ni.internal) out.push(`http://${ni.address}:${port}`);
+    }
+  }
+  return out;
+}
+
 app.listen(PORT, () => {
-  console.log(`Painel rodando na porta ${PORT}`);
-  if (!process.env.BASE_URL) console.log('AVISO: defina BASE_URL no .env para ativar os webhooks.');
-  if (!process.env.MERCADO_PAGO_ACCESS_TOKEN) console.log('AVISO: defina MERCADO_PAGO_ACCESS_TOKEN no .env para gerar Pix.');
+  const webhookMode = /^https:\/\//.test(BASE_URL);
+  console.log('');
+  console.log('  🤖 Painel de Bots no ar');
+  console.log('  Neste aparelho : http://localhost:' + PORT);
+  lanUrls(PORT).forEach((u) => console.log('  Mesma Wi-Fi     : ' + u));
+  console.log('  Telegram        : ' + (webhookMode ? 'webhook ' + BASE_URL : 'polling local (sem URL publica)'));
+  console.log('  Dados           : ' + db.DATA_DIR);
+  console.log('  Node            : ' + process.version);
+  console.log('');
+  if (!webhookMode) {
+    console.log('  Modo celular: Telegram via getUpdates; Pix confirmado pelo job de 60s.');
+  }
+  if (!process.env.MERCADO_PAGO_ACCESS_TOKEN) {
+    console.log('  AVISO: defina MERCADO_PAGO_ACCESS_TOKEN no .env para gerar Pix.');
+  }
   startJobs();
   startPolling();
 });

@@ -10,7 +10,7 @@ function resolveDataDir() {
     path.join(os.tmpdir(), 'botmaker-data')
   ].filter(Boolean);
 
-  const persistent = process.env.DATA_DIR && process.env.RAILWAY_ENVIRONMENT;
+  const persistent = !!process.env.DATA_DIR;
   for (const dir of candidates) {
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -19,7 +19,7 @@ function resolveDataDir() {
       fs.unlinkSync(probe);
       if (process.env.DATA_DIR && dir !== process.env.DATA_DIR) {
         console.warn(`AVISO: DATA_DIR="${process.env.DATA_DIR}" nao esta gravavel. Usando ${dir}`);
-        if (persistent) console.warn('AVISO: sem volume montado, os dados serao APAGADOS a cada deploy.');
+        if (persistent) console.warn('AVISO: sem disco/volume persistente, os dados serao APAGADOS a cada reinicio.');
       }
       return dir;
     } catch (e) {

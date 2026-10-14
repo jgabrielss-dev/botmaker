@@ -36,9 +36,13 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-router.get('/health', (req, res) =>
-  res.json({
+router.get('/health', (req, res) => {
+  const dataDir = process.env.DATA_DIR || '';
+  // Considera absoluto tambem no Windows (C:\... ou \\ UNC), nao so no Unix (/...).
+  const dataDirAbsolute = /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(dataDir);
+  return res.json({
     ok: true,
+    mode: /^https:\/\//.test(process.env.BASE_URL || '') ? 'webhook' : 'polling (celular/sem URL publica)',
     dataDir: process.env.DATA_DIR || '(padrao)',
     baseUrl: process.env.BASE_URL || null,
     adminPassword: !!process.env.ADMIN_PASSWORD,
@@ -60,15 +64,15 @@ router.get('/health', (req, res) =>
         ? 'BASE_URL parece ser o texto de exemplo, troque pelo dominio real'
         : null,
       process.env.BASE_URL && !/^https:\/\//.test(process.env.BASE_URL) ? 'BASE_URL precisa comecar com https://' : null,
-      process.env.DATA_DIR && !process.env.DATA_DIR.startsWith('/')
-        ? `DATA_DIR="${process.env.DATA_DIR}" e relativa: os dados sao apagados a cada deploy (use /data com volume)`
+      dataDir && !dataDirAbsolute
+        ? `DATA_DIR="${dataDir}" e relativa: os dados sao apagados a cada deploy (use /data com volume)`
         : null,
-      process.env.DATA_DIR && process.env.DATA_DIR !== '/data' && process.env.DATA_DIR.startsWith('/')
-        ? `DATA_DIR="${process.env.DATA_DIR}" (o volume costuma ser /data, minusculo)`
+      dataDir.startsWith('/') && dataDir !== '/data'
+        ? `DATA_DIR="${dataDir}" (o volume costuma ser /data, minusculo)`
         : null
     ].filter(Boolean)
-  })
-);
+  });
+});
 
 router.use(auth.requireAuth);
 
@@ -106,8 +110,14 @@ router.post('/bots', async (req, res) => {
   }
 
   const bot = E.getBot(id);
+  const baseUrl = (process.env.BASE_URL || '').replace(/\/+$/, '');
+  if (!/^https:\/\//.test(baseUrl)) {
+    // Modo celular / sem URL publica: garante que o bot use polling local.
+    await tg.deleteWebhook(bot).catch(() => {});
+    return res.json({ ...E.getBot(id), mode: 'polling' });
+  }
   try {
-    const url = await tg.setWebhook(bot, process.env.BASE_URL || '');
+    const url = await tg.setWebhook(bot, baseUrl);
     db.prepare('UPDATE bots SET webhook_url = ? WHERE id = ?').run(url, id);
   } catch (e) {
     return res.json({ ...E.getBot(id), warning: 'Bot salvo, mas webhook falhou: ' + e.message });

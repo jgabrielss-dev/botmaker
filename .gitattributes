@@ -1,0 +1,4 @@
+# Scripts rodam no Termux/Linux: garantir fim de linha LF sempre.
+*.sh text eol=lf
+# Nao tratar imagens como texto.
+*.png binary
