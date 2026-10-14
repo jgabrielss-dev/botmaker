@@ -120,13 +120,21 @@ O Android suspende apps em segundo plano. Para o painel não cair:
   *Configurações → Apps → Termux → Bateria → Sem restrições*.
 - Em alguns aparelhos (Xiaomi, Samsung, Huawei…), fixe o Termux na tela de recentes
   (“bloquear”/“travar” o app) e permita **autoinício**.
-- **Autostart ao ligar o celular:** rode `bash scripts/termux/enable-autostart.sh`,
-  instale o app **Termux:Boot** e abra-o uma vez.
+- **Autostart ao ligar o celular:**
+  1. Instale o app **Termux:Boot** (F-Droid) e **abra-o uma vez** (a tela é vazia; é normal).
+  2. Rode `bash scripts/termux/enable-autostart.sh` (cria `~/.termux/boot/00-painel-bots.sh`).
+  3. Reinicie o celular e confira `tail -n 20 logs/boot.log`: deve ter a linha
+     `Termux:Boot executou o script`. O script só roda no boot (não ao abrir o Termux).
+  > Detalhe técnico: o Termux:Boot **não** carrega o `termux-exec`, então o script usa o
+  > shebang absoluto `#!/data/data/com.termux/files/usr/bin/bash` e define o `PATH`. Sem
+  > isso o boot falha em silêncio. Se não rodar, ative **autoinício** também para o
+  > Termux:Boot e desative a otimização de bateria dele.
 
 **Comandos úteis**
 
 ```bash
 tail -f logs/server.log        # ver o log ao vivo
+tail -n 20 logs/boot.log       # log do autostart (Termux:Boot)
 bash scripts/termux/stop.sh    # parar o painel
 bash scripts/termux/start.sh   # subir de novo
 ```
