@@ -41,10 +41,30 @@ export BASE_URL="${BASE_URL:-}"   # vazio = modo celular (polling, sem URL publi
 echo $$ > logs/panel.pid
 echo "[$(date '+%F %T')] painel iniciado (porta $PORT)" >> logs/server.log
 
+fails=0
 while true; do
   echo "[$(date '+%F %T')] iniciando servidor" >> logs/server.log
+  start=$(date +%s)
   node server/index.js >> logs/server.log 2>&1
   code=$?
-  echo "[$(date '+%F %T')] servidor saiu (codigo $code); reiniciando em 3s" >> logs/server.log
-  sleep 3
+  dur=$(( $(date +%s) - start ))
+
+  # rodou por pelo menos 10s? foi so um restart normal e zera as falhas seguidas.
+  if [ "$dur" -ge 10 ]; then
+    fails=0
+  else
+    fails=$((fails + 1))
+  fi
+
+  # erro que se repete (ex.: node quebrado) desacelera em vez de tentar a cada 3s
+  if [ "$fails" -ge 5 ]; then
+    delay=60
+  elif [ "$fails" -ge 3 ]; then
+    delay=15
+  else
+    delay=3
+  fi
+
+  echo "[$(date '+%F %T')] servidor saiu (codigo $code, ${dur}s); reiniciando em ${delay}s (falhas seguidas: $fails)" >> logs/server.log
+  sleep "$delay"
 done

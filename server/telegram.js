@@ -18,17 +18,18 @@ async function call(method, payload, token) {
   return data.result;
 }
 
+/* callback_data do Telegram tem limite de 64 BYTES. Botoes cujo destino
+   estouraria o limite sao ignorados aqui (a UI ja impede de criar). */
 function keyboardFor(node) {
   const buttons = Array.isArray(node.buttons) ? node.buttons : [];
-  if (!buttons.length) return undefined;
-  return {
-    inline_keyboard: buttons
-      .filter((b) => b && b.to)
-      .map((b) => [{ text: b.label || '▶️', callback_data: 'go:' + b.to }])
-  };
+  const rows = buttons
+    .filter((b) => b && b.to && Buffer.byteLength('go:' + b.to, 'utf8') <= 64)
+    .map((b) => [{ text: String(b.label || '▶️').slice(0, 64), callback_data: 'go:' + b.to }]);
+  if (!rows.length) return undefined;
+  return { inline_keyboard: rows };
 }
 
-async function sendText(token, chatId, text, reply_markup, opts = {}) {
+async function sendTextChunk(token, chatId, text, reply_markup, opts = {}) {
   const payload = {
     chat_id: chatId,
     text: text || '',
@@ -44,6 +45,20 @@ async function sendText(token, chatId, text, reply_markup, opts = {}) {
     }
     throw e;
   }
+}
+
+/* Telegram limita a 4096 caracteres por mensagem; divide em pedacos maiores. */
+async function sendText(token, chatId, text, reply_markup, opts = {}) {
+  const chars = Array.from(text == null ? '' : String(text));
+  const chunks = [];
+  for (let i = 0; i < chars.length; i += 4000) chunks.push(chars.slice(i, i + 4000).join(''));
+  if (!chunks.length) chunks.push('');
+  let last;
+  for (let i = 0; i < chunks.length; i++) {
+    const markup = i === chunks.length - 1 ? reply_markup : undefined;
+    last = await sendTextChunk(token, chatId, chunks[i], markup, opts);
+  }
+  return last;
 }
 
 /* ---------------- Midias (varias URLs e/ou arquivos locais) ---------------- */
@@ -76,6 +91,28 @@ function isParseError(e) {
   return /parse|Entities|unsupported/i.test((e && (e.description || e.message)) || '');
 }
 
+const EXT_MIME = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.pdf': 'application/pdf',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg'
+};
+
+function mimeFor(item) {
+  const ext = path.extname(item.file || '').toLowerCase();
+  if (EXT_MIME[ext]) return EXT_MIME[ext];
+  if (item.type === 'video') return 'video/mp4';
+  if (item.type === 'document') return 'application/octet-stream';
+  return 'image/jpeg';
+}
+
 async function sendUrlItem(token, chatId, item, caption, reply_markup) {
   const { method, field } = pickMethod(item.type, item.url);
   const base = { chat_id: chatId, [field]: item.url, reply_markup };
@@ -92,17 +129,26 @@ async function sendUrlItem(token, chatId, item, caption, reply_markup) {
 }
 
 async function sendFileItem(token, chatId, item, caption, reply_markup) {
-  const buf = fs.readFileSync(path.join(db.DATA_DIR, 'uploads', item.file));
+  const filePath = path.join(db.DATA_DIR, 'uploads', item.file);
+  if (!fs.existsSync(filePath)) throw new Error('arquivo de midia nao encontrado: ' + item.file);
   const { method, field } = pickMethod(item.type, item.name || item.file);
-  const mime = item.type === 'video' ? 'video/mp4' : item.type === 'document' ? 'application/pdf' : 'image/jpeg';
+  const mime = mimeFor(item);
   const ext = path.extname(item.file) || '.bin';
   const rawName = String(item.name || '').replace(/[^\w.\- ]+/g, '_').trim();
   const fileName = (rawName || 'arquivo') + (rawName.includes('.') ? '' : ext);
 
+  // streaming: nao carrega o arquivo inteiro na memoria quando o Node oferecer openAsBlob
+  let blob;
+  if (typeof fs.openAsBlob === 'function') {
+    blob = await fs.openAsBlob(filePath, { type: mime });
+  } else {
+    blob = new Blob([fs.readFileSync(filePath)], { type: mime });
+  }
+
   const build = (withCaption) => {
     const form = new FormData();
     form.append('chat_id', String(chatId));
-    form.append(field, new Blob([buf], { type: mime }), fileName);
+    form.append(field, blob, fileName);
     if (withCaption && caption) form.append('caption', caption);
     if (withCaption && caption) form.append('parse_mode', 'HTML');
     if (reply_markup) form.append('reply_markup', JSON.stringify(reply_markup));
@@ -139,35 +185,41 @@ async function sendNode(token, chatId, node) {
   const reply_markup = keyboardFor(node);
   if (!items.length) return sendText(token, chatId, text, reply_markup);
 
+  // a legenda do Telegram vai ate 1024 caracteres; textos maiores vao em mensagem separada
+  const longText = Array.from(text).length > 1024;
   let textSent = false;
   let sentAny = false;
   let lastErr = null;
 
   for (let i = 0; i < items.length; i++) {
-    const caption = i === 0 && text && !textSent ? text : '';
+    const useCaption = i === 0 && text && !longText && !textSent;
     const markup = i === 0 ? reply_markup : undefined;
     try {
-      await sendItem(token, chatId, items[i], caption, markup);
+      await sendItem(token, chatId, items[i], useCaption ? text : '', markup);
       sentAny = true;
-      if (caption) textSent = true;
+      if (useCaption) textSent = true;
     } catch (e) {
       lastErr = e;
-      // fallback: envia a midia sem legenda e o texto em seguida
+      // fallback: envia a midia sem legenda (o texto vai logo abaixo)
       try {
         await sendItem(token, chatId, items[i], '', undefined);
         sentAny = true;
-        if (caption) {
-          await sendText(token, chatId, text, reply_markup);
-          textSent = true;
-        }
       } catch (e2) {
         lastErr = e2;
+      }
+    }
+    if (i === 0 && text && !textSent) {
+      try {
+        await sendText(token, chatId, text, reply_markup);
+        textSent = true;
+      } catch (e) {
+        lastErr = e;
       }
     }
   }
 
   if (!sentAny) {
-    if (text) return sendText(token, chatId, text, reply_markup);
+    if (text && !textSent) return sendText(token, chatId, text, reply_markup);
     throw lastErr || new Error('sendNode: nenhuma midia enviada');
   }
   return { sent: true };

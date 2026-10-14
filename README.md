@@ -29,7 +29,7 @@ telegram/
 ├── public/
 │   ├── index.html              # painel mobile (login, bots, builder de fluxos, grupos, clientes, Pix)
 │   ├── manifest.webmanifest    # PWA: instalar o painel na tela inicial
-│   ├── sw.js                   # service worker (sem cache)
+│   ├── sw.js                   # service worker (cache só do Tailwind CDN)
 │   └── icon-192.png / icon-512.png
 ├── scripts/
 │   ├── selftest.js             # auto-teste do backend (fetch mockado)
@@ -157,7 +157,8 @@ Como usa **polling**, não precisa de domínio, HTTPS nem IP público — basta 
    [ -s .env ] || cp .env.example .env
    nano .env
    ```
-   - `ADMIN_PASSWORD` = sua senha do painel
+   - `ADMIN_PASSWORD` = sua senha do painel (se deixar vazio, uma senha aleatória é
+     gerada e mostrada no log na 1ª vez)
    - `MERCADO_PAGO_ACCESS_TOKEN` e `MERCADO_PAGO_PUBLIC_KEY` = suas chaves do Mercado Pago
    - **`BASE_URL=` (deixe vazio!)** → modo celular (polling + Pix pelo job de 60s)
    - Salve com `Ctrl+O`, `Enter` e saia com `Ctrl+X`.
@@ -233,6 +234,7 @@ bash scripts/termux/start.sh   # subir de novo
 ```env
 MERCADO_PAGO_ACCESS_TOKEN=[cole aqui]
 MERCADO_PAGO_PUBLIC_KEY=[cole aqui]
+MERCADO_PAGO_WEBHOOK_SECRET=      # opcional: só no modo webhook (HTTPS)
 ADMIN_PASSWORD=[cole aqui]
 BASE_URL=                 # vazio = modo celular/polling
 PORT=3000
@@ -243,7 +245,8 @@ DATA_DIR=./data
 |---|---|---|
 | `MERCADO_PAGO_ACCESS_TOKEN` | Sim (p/ Pix) | Access Token de produção (APP_USR-...) usado em `POST /v1/payments` |
 | `MERCADO_PAGO_PUBLIC_KEY` | Sim (p/ Pix) | Public Key (usada se você quiser checkout no front) |
-| `ADMIN_PASSWORD` | Sim | Senha do painel (padrão `admin` se ausente) |
+| `MERCADO_PAGO_WEBHOOK_SECRET` | Não | Se preenchido, o `/mp/webhook` exige a assinatura oficial do Mercado Pago e rejeita chamadas falsas |
+| `ADMIN_PASSWORD` | Recomendada | Senha do painel. Se **ausente**, o sistema **gera uma senha aleatória** na 1ª execução e mostra no log (e em `DATA_DIR/admin-password.txt`). Não existe mais a senha padrão `admin` |
 | `BASE_URL` | Não | URL pública HTTPS. **Vazio = modo celular**: polling no Telegram + Pix confirmado pelo job. Preenchida = webhook |
 | `DATA_DIR` | Não | Pasta do SQLite/uploads. No celular use `./data` |
 | `PORT` | Não | Porta HTTP (padrão 3000) |
@@ -301,7 +304,9 @@ processo contínuo + disco.
    - **🛟 Nó de resgate (beco sem saída)**: para onde vai quem ficou sem caminho
      (fim de linha ou Pix travado). Só **1 por fluxo**.
    Cada nó (toque para abrir) tem:
-   - **ID**: chave do nó (ex.: `inicio`, `pay`, `obrigado`) — botões usam esse ID
+   - **ID**: chave do nó (ex.: `inicio`, `pay`, `obrigado`) — botões usam esse ID.
+     Use só letras, números, `_` e `-`, com até 61 caracteres (o botão do Telegram
+     tem limite de 64 bytes; IDs maiores bloqueiam a ativação)
    - **Mensagem**: texto (aceita `<b>`, `<i>`, `<code>`)
    - **Mídias**: *várias* URLs e/ou arquivos do aparelho (📎) — foto/vídeo/pdf/áudio.
      O texto do nó vira legenda da **primeira** mídia; os arquivos locais ficam em
@@ -343,6 +348,10 @@ processo contínuo + disco.
 - **Com `BASE_URL`:** o sistema envia `notification_url` (`https://SEU-DOMINIO/mp/webhook`)
   em cada cobrança. Cadastre também em **Sua conta → Configurações → Webhooks** a URL
   `https://SEU-DOMINIO/mp/webhook` (evento **Pagamentos**).
+  Se você cadastrou uma **chave secreta** no webhook, copie-a para
+  `MERCADO_PAGO_WEBHOOK_SECRET` no `.env` — assim o `/mp/webhook` valida a assinatura
+  (`x-signature`) e rejeita chamadas falsas. Sem o segredo, o endpoint ainda só consulta
+  pagamentos que o próprio sistema criou.
 - Quando o status chega como `approved`, o usuário é desbloqueado e avança para o próximo nó.
 
 ## 7. Comportamentos automáticos (jobs)
@@ -350,8 +359,12 @@ processo contínuo + disco.
 | Job | Intervalo | O que faz |
 |---|---|---|
 | Inatividade | 15s | Quando o timer do nó expira, avança para o *nó de retorno* daquele nó (ou `wait_node` legado, ou o próximo nó) |
-| Sincronia de pagamentos | 60s | Confere o status no MP (rede de segurança do modo celular e do webhook) |
+| Sincronia de pagamentos | 60s | Confere o status no MP e **destrava o cliente automaticamente** quando aprovado (essencial no modo celular) |
 | Lembrete/recuperação | checado a cada 30min (1x por hora por cliente) | **Beco sem saída** (Pix travado ou fim de linha): leva o cliente para o *nó da inatividade*; sem marcador, reenvia o *texto de lembrete* do nó atual |
+| Limpeza de sessões | 1h | Remove sessões de login expiradas (7 dias) |
+
+> Ao subir o servidor, clientes antigos que ainda não tinham marco de lembrete recebem
+> um marco "agora" — assim ninguém é bombardeado com lembretes logo após um reinício.
 
 ## 8. Variáveis do Telegram
 

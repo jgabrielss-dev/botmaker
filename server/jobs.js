@@ -1,6 +1,7 @@
 const db = require('./db');
 const E = require('./engine');
 const tg = require('./telegram');
+const auth = require('./auth');
 
 const HOUR = 1000 * 60 * 60;
 
@@ -34,16 +35,15 @@ function tickInactivity() {
 /* 2) Sincroniza pagamentos pendentes (rede de seguranca do webhook) */
 async function tickPayments() {
   const rows = db
-    .prepare("SELECT * FROM payments WHERE status = 'pending' AND created_at < ?")
-    .all(Date.now() - 60 * 1000)
-    .slice(0, 20);
+    .prepare("SELECT * FROM payments WHERE status = 'pending' AND created_at < ? ORDER BY created_at ASC LIMIT 20")
+    .all(Date.now() - 60 * 1000);
   for (const p of rows) {
     try {
       if (!p.mp_id) continue;
       const info = await require('./mercadopago').getPayment(p.mp_id);
       if (!info) continue;
       if (info.status === 'approved') {
-        db.prepare("UPDATE payments SET status = 'approved', updated_at = ? WHERE id = ?").run(Date.now(), p.id);
+        // o engine marca como aprovado E destrava o cliente que aguardava (idempotente)
         await E.onPaymentApproved(p.mp_id);
       } else if (info.status === 'rejected' || info.status === 'cancelled') {
         db.prepare("UPDATE payments SET status = ?, updated_at = ? WHERE id = ?").run(info.status, Date.now(), p.id);
@@ -77,7 +77,7 @@ function tickReminders() {
           : null;
         if (payment && payment.status === 'approved') {
           E.updateClient(client.id, { last_reminder: now, updated_at: now });
-          E.onPaymentApproved(payment.mp_id);
+          E.onPaymentApproved(payment.mp_id).catch((e) => console.error('approve sync:', e.message));
           continue;
         }
         if (!payment || payment.status === 'pending' || payment.status === 'expired') reason = 'pix';
@@ -119,15 +119,30 @@ function tickReminders() {
 }
 
 function startJobs() {
+  // Clientes antigos (last_reminder = 0) ganham um marco agora para NAO receberem
+  // o lembrete de 1h em massa logo que o servidor sobe.
+  try {
+    db.prepare('UPDATE clients SET last_reminder = ? WHERE last_reminder = 0').run(Date.now());
+  } catch (e) {
+    console.error('prime reminders:', e.message);
+  }
   setInterval(tickInactivity, 15 * 1000);
   setInterval(() => {
     tickPayments().catch((e) => console.error(e));
   }, 60 * 1000);
   setInterval(tickReminders, 30 * 60 * 1000);
+  // limpa sessoes expiradas de hora em hora (evita crescer sem limite)
+  setInterval(() => {
+    try {
+      auth.cleanupSessions();
+    } catch (e) {
+      console.error('session cleanup:', e.message);
+    }
+  }, HOUR);
   tickInactivity();
   tickReminders();
   tickPayments().catch((e) => console.error(e));
-  console.log('Jobs agendados: inatividade (15s), pagamentos (60s), lembretes (30min).');
+  console.log('Jobs agendados: inatividade (15s), pagamentos (60s), lembretes (30min), sessoes (1h).');
 }
 
 module.exports = { startJobs, tickInactivity, tickPayments, tickReminders };

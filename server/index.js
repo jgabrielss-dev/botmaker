@@ -41,6 +41,7 @@
 require('dotenv').config();
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const api = require('./api');
 const db = require('./db');
@@ -53,6 +54,28 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const BASE_URL = (process.env.BASE_URL || '').replace(/\/+$/, '');
 
+/* Valida a assinatura do webhook do Mercado Pago quando o segredo estiver
+   configurado (MERCADO_PAGO_WEBHOOK_SECRET). Header x-signature:
+   "ts=1704908010,v1=<hmac>"; manifesto: id:<data.id>;request-id:<req>;ts:<ts>; */
+function verifyMpSignature(req, dataId, secret) {
+  const sig = String(req.get('x-signature') || '');
+  if (!sig) return false;
+  const parts = {};
+  sig.split(',').forEach((p) => {
+    const i = p.indexOf('=');
+    if (i > -1) parts[p.slice(0, i).trim()] = p.slice(i + 1).trim();
+  });
+  if (!parts.ts || !parts.v1) return false;
+  const reqId = String(req.get('x-request-id') || '');
+  const manifest = `id:${dataId};request-id:${reqId};ts:${parts.ts};`;
+  const hmac = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(parts.v1));
+  } catch (e) {
+    return false;
+  }
+}
+
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -63,7 +86,7 @@ app.get('/uploads/:file', auth.requireAuth, (req, res) => {
   const file = path.basename(String(req.params.file || ''));
   if (!file || file.startsWith('.')) return res.sendStatus(400);
   res.sendFile(path.join(db.DATA_DIR, 'uploads', file), (err) => {
-    if (err) res.sendStatus(404);
+    if (err && !res.headersSent) res.sendStatus(404);
   });
 });
 
@@ -88,6 +111,18 @@ app.post('/mp/webhook', async (req, res) => {
     const q = req.query || {};
     const id = q['data.id'] || q.id || (req.body && req.body.data && req.body.data.id) || (req.body && req.body.data);
     if (!id) return;
+
+    // quando o segredo esta configurado, exige a assinatura do Mercado Pago
+    const secret = process.env.MERCADO_PAGO_WEBHOOK_SECRET;
+    if (secret && !verifyMpSignature(req, id, secret)) {
+      console.warn('mp webhook: assinatura invalida, ignorado');
+      return;
+    }
+
+    // so consultamos pagamentos que NOS criamos (ignora ids arbitrarios)
+    const local = db.prepare('SELECT id FROM payments WHERE mp_id = ?').get(String(id));
+    if (!local) return;
+
     const mp = require('./mercadopago');
     const info = await mp.getPayment(id);
     if (info && info.status === 'approved') await E.onPaymentApproved(info.id);
@@ -97,6 +132,8 @@ app.post('/mp/webhook', async (req, res) => {
 });
 
 app.use('/api', api);
+/* Rota desconhecida em /api deve devolver JSON 404 (e nao o index.html). */
+app.use('/api', (req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
@@ -127,6 +164,11 @@ app.listen(PORT, () => {
   }
   if (!process.env.MERCADO_PAGO_ACCESS_TOKEN) {
     console.log('  AVISO: defina MERCADO_PAGO_ACCESS_TOKEN no .env para gerar Pix.');
+  }
+  if (auth.usingGeneratedPassword()) {
+    console.log('');
+    console.log('  SENHA DO PAINEL : ' + auth.expectedPassword());
+    console.log('  (gerada automaticamente; defina ADMIN_PASSWORD no .env para escolher a sua)');
   }
   startJobs();
   startPolling();

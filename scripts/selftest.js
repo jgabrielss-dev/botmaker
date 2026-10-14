@@ -21,9 +21,8 @@ global.fetch = async (url, opts) => {
   calls.push({ url: u, body: opts && opts.body, isForm });
   if (u.includes('createChatInviteLink')) return json({ ok: true, result: { invite_link: 'https://t.me/+GRUPO-UNICO' } });
   if (u.includes('api.telegram.org')) return json({ ok: true, result: { message_id: 1 } });
-  if (u.includes('meradopago') || u.includes('mercadopago.com/v1/payments/999')) {
-    return json({ id: 999, status: mpStatus, transaction_amount: 10.5 });
-  }
+  const payMatch = u.match(/mercadopago\.com\/v1\/payments\/(\d+)/);
+  if (payMatch) return json({ id: Number(payMatch[1]), status: mpStatus, transaction_amount: 10.5 });
   if (u.includes('mercadopago.com/v1/payments')) {
     return json({
       id: 999,
@@ -121,8 +120,13 @@ global.fetch = async (url, opts) => {
   assert.strictEqual(auth.login('errada'), null);
   assert.ok(auth.passwordIssues().length >= 1, 'deveria apontar aspas/espacos');
   delete process.env.ADMIN_PASSWORD;
-  assert.ok(auth.login('admin'), 'padrao admin deveria valer sem a variavel');
-  console.log('8. normalizacao de senha OK');
+  // sem ADMIN_PASSWORD o servidor gera uma senha aleatoria (nao usa mais "admin")
+  const gen = auth.expectedPassword();
+  assert.ok(gen && gen.length >= 16, 'deveria gerar senha aleatoria sem ADMIN_PASSWORD');
+  assert.ok(auth.login(gen), 'deveria entrar com a senha gerada');
+  assert.strictEqual(auth.login('admin'), null, 'a senha padrao "admin" nao deve mais funcionar');
+  assert.strictEqual(auth.usingGeneratedPassword(), true, 'deveria sinalizar senha gerada');
+  console.log('8. normalizacao de senha + senha gerada OK');
 
   // 9) inatividade usa o marcador do FLUXO (toggle "este e o no da inatividade")
   const data3 = {
@@ -334,6 +338,36 @@ global.fetch = async (url, opts) => {
   assert.strictEqual(c19.node_key, 'depois', 'desbloquear deveria avancar para o proximo no');
   assert.strictEqual(c19.status, 'active');
   console.log('19. acao manual "desbloquear" OK');
+
+  // 20) REGRESSAO do bug critico: o job de 60s (tickPayments) destrava o cliente
+  //     quando o Mercado Pago aprova, SEM o cliente mandar outra mensagem.
+  const bot20 = db.prepare('INSERT INTO bots (name, token, secret, created_at) VALUES (?,?,?,?)').run('Bot Job', '456:def', 'sec2', Date.now());
+  const botId20 = Number(bot20.lastInsertRowid);
+  const data20 = {
+    start: 'p',
+    order: ['p', 'ok'],
+    nodes: {
+      p: { text: 'Pague', price: 12.34, wait: 0, buttons: [], next: 'ok' },
+      ok: { text: 'Liberado', price: 0, wait: 0, buttons: [], next: '' }
+    }
+  };
+  const f20 = db.prepare('INSERT INTO flows (bot_id, name, data, created_at) VALUES (?,?,?,?)').run(botId20, 'Fluxo Job', JSON.stringify(data20), Date.now());
+  db.prepare('UPDATE bots SET flow_id = ? WHERE id = ?').run(f20.lastInsertRowid, botId20);
+  const cli20 = db
+    .prepare('INSERT INTO clients (bot_id, chat_id, flow_id, node_key, status, last_activity, last_reminder, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+    .run(botId20, '9001', f20.lastInsertRowid, 'p', 'waiting_payment', Date.now(), Date.now(), Date.now());
+  const pay20 = db
+    .prepare('INSERT INTO payments (bot_id, chat_id, flow_id, node_key, mp_id, status, amount, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(botId20, '9001', f20.lastInsertRowid, 'p', '777001', 'pending', 12.34, Date.now() - 120000, Date.now());
+  db.prepare('UPDATE clients SET payment_id = ? WHERE id = ?').run(pay20.lastInsertRowid, cli20.lastInsertRowid);
+
+  mpStatus = 'approved';
+  await jobs.tickPayments();
+  const c20 = E.getClient(botId20, 9001);
+  assert.strictEqual(c20.node_key, 'ok', 'job de 60s deveria destravar e avancar o cliente');
+  assert.strictEqual(c20.status, 'active');
+  assert.strictEqual(db.prepare('SELECT status FROM payments WHERE id = ?').get(pay20.lastInsertRowid).status, 'approved');
+  console.log('20. job de 60s destrava o Pix aprovado (regressao do bug critico) OK');
 
   console.log('\nTODOS OS TESTES PASSARAM');
   process.exit(0);

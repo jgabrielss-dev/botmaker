@@ -3,13 +3,14 @@ const tg = require('./telegram');
 const mp = require('./mercadopago');
 
 const PIX_TTL = 1000 * 60 * 40; // Pix considerado expirado apos 40 min
+const PIX_RETRY_COOLDOWN = 1000 * 15; // evita recriar Pix a cada mensagem seguida
 
 function getBot(botId) {
   return db.prepare('SELECT * FROM bots WHERE id = ?').get(botId);
 }
 
 function getFlow(bot, flowId) {
-  const id = flowId || bot.flow_id;
+  const id = flowId || (bot && bot.flow_id);
   if (!id) return null;
   const row = db.prepare('SELECT * FROM flows WHERE id = ?').get(id);
   if (!row) return null;
@@ -30,9 +31,11 @@ function getClient(botId, chatId) {
   let row = db.prepare('SELECT * FROM clients WHERE bot_id = ? AND chat_id = ?').get(botId, String(chatId));
   if (!row) {
     const now = Date.now();
+    // last_reminder comeca em branco so depois desta conversa: assim um cliente novo
+    // nao recebe o lembrete de 1h antes mesmo de ter interagido.
     db.prepare(
       'INSERT INTO clients (bot_id, chat_id, status, last_activity, last_reminder, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(botId, String(chatId), 'active', now, 0, now);
+    ).run(botId, String(chatId), 'active', now, now, now);
     row = db.prepare('SELECT * FROM clients WHERE bot_id = ? AND chat_id = ?').get(botId, String(chatId));
   }
   return row;
@@ -143,12 +146,14 @@ async function enterNode(bot, client, flow, nodeKey) {
   });
 
   if (hasPrice) {
+    updateClient(client.id, { last_pix_at: Date.now() });
     try {
       const payment = await createPayment(bot, client, flow, node, nodeKey);
       updateClient(client.id, { payment_id: payment.id, updated_at: Date.now() });
       await tg.sendPixMessage(bot, client.chat_id, payment, node);
     } catch (e) {
       console.error('pix error:', e.message);
+      // Fica 'active' para o usuario poder usar botoes/proximo e nao ficar sem saida.
       updateClient(client.id, { status: 'active', updated_at: Date.now() });
       await safeReply(bot, client.chat_id, '⚠️ Não foi possível gerar o Pix agora. Tente novamente em instantes.');
     }
@@ -172,34 +177,51 @@ async function recheckPayment(bot, client, flow) {
     : db
         .prepare("SELECT * FROM payments WHERE bot_id = ? AND chat_id = ? ORDER BY id DESC LIMIT 1")
         .get(bot.id, String(client.chat_id));
-  if (!payment) return false;
-  if (payment.status === 'approved') return true;
+  if (!payment) return null;
+  // ja aprovado no banco: devolve para destravar o cliente (o cliente pode ter
+  // ficado preso em waiting_payment mesmo apos a aprovacao).
+  if (payment.status === 'approved') return payment;
 
   let info = null;
   if (payment.mp_id) info = await mp.getPayment(payment.mp_id).catch(() => null);
   if (info && info.status === 'approved') {
     db.prepare("UPDATE payments SET status = 'approved', updated_at = ? WHERE id = ?").run(Date.now(), payment.id);
     payment.status = 'approved';
-    return true;
+    return payment;
   }
   if (Date.now() - payment.created_at > PIX_TTL) {
     db.prepare("UPDATE payments SET status = 'expired', updated_at = ? WHERE id = ?").run(Date.now(), payment.id);
+    payment.status = 'expired';
   }
-  return false;
+  return null;
+}
+
+/* Marca o pagamento como aprovado e DESTRAVA o cliente que o aguardava.
+   A atualizacao do cliente e feita em uma unica instrucao condicional, entao
+   duas chamadas simultaneas (webhook + job) nunca avancam o fluxo duas vezes. */
+async function approveAndAdvance(payment) {
+  const client = getClient(payment.bot_id, payment.chat_id);
+  if (!client) return false;
+  const now = Date.now();
+  const upd = db
+    .prepare(
+      "UPDATE clients SET status = 'active', payment_id = NULL, last_activity = ?, updated_at = ? WHERE id = ? AND status = 'waiting_payment' AND payment_id = ?"
+    )
+    .run(now, now, client.id, payment.id);
+  if (upd.changes === 0) return false; // ja destravado por outra chamada
+  const fresh = db.prepare('SELECT * FROM clients WHERE id = ?').get(client.id);
+  const bot = getBot(payment.bot_id);
+  const flow = getFlow(bot, payment.flow_id);
+  const node = getNode(flow, payment.node_key);
+  await advance(bot, fresh, flow, node ? node.next : null);
+  return true;
 }
 
 async function onPaymentApproved(mpId) {
   const payment = db.prepare('SELECT * FROM payments WHERE mp_id = ?').get(String(mpId));
-  if (!payment) return;
+  if (!payment) return false;
   db.prepare("UPDATE payments SET status = 'approved', updated_at = ? WHERE id = ?").run(Date.now(), payment.id);
-  if (payment.status === 'approved') return;
-
-  const client = getClient(payment.bot_id, payment.chat_id);
-  if (!client || (client.status !== 'waiting_payment' || client.payment_id !== payment.id)) return;
-  const bot = getBot(payment.bot_id);
-  const flow = getFlow(bot, payment.flow_id);
-  const node = getNode(flow, payment.node_key);
-  await advance(bot, client, flow, node ? node.next : null);
+  return approveAndAdvance(payment);
 }
 
 /* ---------------- Atualizacoes do Telegram ---------------- */
@@ -235,10 +257,10 @@ async function handleUpdate(bot, update) {
     }
 
     if (client.status === 'waiting_payment') {
-      const approved = await recheckPayment(bot, client, flow);
-      if (approved) return onPaymentApprovedByClient(bot, client, flow);
-      const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(client.payment_id);
-      if (payment && payment.status === 'expired') {
+      const payment = await recheckPayment(bot, client, flow);
+      if (payment) return approveAndAdvance(payment);
+      const cur = client.payment_id ? db.prepare('SELECT * FROM payments WHERE id = ?').get(client.payment_id) : null;
+      if (cur && cur.status === 'expired') {
         return enterNode(bot, client, flow, client.node_key); // gera novo Pix
       }
       return safeReply(bot, chatId, '⏳ Estamos aguardando a confirmação do seu pagamento.');
@@ -246,6 +268,10 @@ async function handleUpdate(bot, update) {
 
     const node = getNode(flow, client.node_key);
     if (node && Number(node.price || 0) > 0) {
+      // evita recriar o Pix a cada mensagem seguida (protege a API do Mercado Pago)
+      if (Date.now() - (client.last_pix_at || 0) < PIX_RETRY_COOLDOWN) {
+        return safeReply(bot, chatId, '⏳ Aguarde alguns segundos e tente novamente para gerar outro Pix.');
+      }
       return enterNode(bot, client, flow, client.node_key);
     }
     return safeReply(bot, client.chat_id, '👇 Use os botões para continuar.');
@@ -267,8 +293,8 @@ async function handleUpdate(bot, update) {
     if (!flow) return;
 
     if (client.status === 'waiting_payment') {
-      const approved = await recheckPayment(bot, client, flow);
-      if (approved) return onPaymentApprovedByClient(bot, client, flow);
+      const payment = await recheckPayment(bot, client, flow);
+      if (payment) return approveAndAdvance(payment);
       return safeReply(bot, chatId, '⏳ Pagamento em análise. Assim que confirmar, o acesso é liberado automaticamente.');
     }
 
@@ -276,12 +302,6 @@ async function handleUpdate(bot, update) {
     if (!target) return safeReply(bot, chatId, '⚠️ Nó do fluxo não encontrado.');
     return enterNode(bot, client, flow, toKey);
   }
-}
-
-async function onPaymentApprovedByClient(bot, client, flow) {
-  const node = getNode(flow, client.node_key);
-  updateClient(client.id, { payment_id: null, status: 'active', updated_at: Date.now() });
-  await advance(bot, client, flow, node ? node.next : null);
 }
 
 /* ------------- Acoes manuais do painel sobre um cliente ------------- */
@@ -322,7 +342,9 @@ module.exports = {
   handleUpdate,
   onPaymentApproved,
   recheckPayment,
+  approveAndAdvance,
   restartClient,
   unlockClient,
-  PIX_TTL
+  PIX_TTL,
+  PIX_RETRY_COOLDOWN
 };

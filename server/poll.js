@@ -7,9 +7,11 @@ const tg = require('./telegram');
 const offsets = new Map();
 const running = new Set();
 const problems = new Map();
+const conflicts = new Map(); // botId -> timestamp do ultimo conflito 409
 let enabled = true;
 let timer = null;
 
+const CONFLICT_COOLDOWN = 60 * 1000; // nao tenta de novo antes de 1 min
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function pollable(bot) {
@@ -34,6 +36,7 @@ async function loop(bot) {
         { offset: offsets.get(bot.id) || 0, timeout: 10, limit: 100, allowed_updates: ['message', 'callback_query'] },
         still.token
       );
+      problems.delete(bot.id); // respondeu = problema resolvido
       const list = Array.isArray(updates) ? updates : [];
       let max = offsets.get(bot.id) || 0;
       for (const u of list) {
@@ -50,8 +53,9 @@ async function loop(bot) {
     } catch (e) {
       const desc = e.description || e.message || '';
       if (/409|conflict|terminated by other/i.test(desc)) {
-        problems.set(still.id, 'Outra instância já chama getUpdates (ou webhook ativo). Polling parado para este bot.');
-        console.warn(`Polling desativado para o bot ${still.id}: outra instancia ja chama getUpdates (ou webhook ativo).`);
+        conflicts.set(still.id, Date.now()); // respeita um tempo antes de tentar de novo
+        problems.set(still.id, 'Outra instância já chama getUpdates (ou webhook ativo). Polling pausado por 1 min.');
+        console.warn(`Polling pausado para o bot ${still.id}: outra instancia ja chama getUpdates (ou webhook ativo).`);
         break;
       }
       problems.set(still.id, desc);
@@ -71,8 +75,10 @@ function tick() {
   }
   for (const bot of bots) {
     if (running.has(bot.id)) continue;
+    const lastConflict = conflicts.get(bot.id);
+    if (lastConflict && Date.now() - lastConflict < CONFLICT_COOLDOWN) continue; // evita loop de 409
+    conflicts.delete(bot.id);
     running.add(bot.id);
-    problems.delete(bot.id);
     console.log(`Bot ${bot.id} (${bot.name}) em modo polling local (sem webhook).`);
     loop(bot).finally(() => running.delete(bot.id));
   }

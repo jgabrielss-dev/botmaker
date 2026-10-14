@@ -53,7 +53,6 @@
       </div>
       <button class="w-full py-3 rounded-xl bg-indigo-600 font-semibold active:bg-indigo-500">Entrar</button>
       <p id="loginError" class="text-red-400 text-sm text-center hidden"></p>
-      <p id="loginDebug" class="text-slate-500 text-[11px] text-center hidden"></p>
     </form>
   </div>
 </div>
@@ -384,7 +383,6 @@ $('#togglePw').addEventListener('click', () => {
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const err = $('#loginError'); err.classList.add('hidden');
-  const dbg = $('#loginDebug'); dbg.classList.add('hidden');
   try {
     await api('/login', { body: { password: $('#loginPassword').value } });
     showApp();
@@ -393,12 +391,6 @@ $('#loginForm').addEventListener('submit', async (e) => {
   } catch (ex) {
     err.textContent = ex.message;
     err.classList.remove('hidden');
-    const d = ex.data || {};
-    if (d.debug) {
-      dbg.textContent = `Detalhes: você digitou ${d.debug.digitada}; a senha gravada tem ${d.debug.gravada}.`
-        + (d.debug.avisos && d.debug.avisos.length ? ` Avisos na senha: ${d.debug.avisos.join(', ')}.` : '');
-      dbg.classList.remove('hidden');
-    }
   }
 });
 
@@ -412,10 +404,11 @@ function go(view) {
     b.classList.toggle('text-indigo-400', on);
     b.classList.toggle('text-slate-400', !on);
   });
-  if (view === 'bots') loadBots();
-  if (view === 'groups') loadGroups();
-  if (view === 'clients') loadClients();
-  if (view === 'payments') loadPayments();
+  const fail = (e) => toast(e.message, false);
+  if (view === 'bots') loadBots().catch(fail);
+  if (view === 'groups') loadGroups().catch(fail);
+  if (view === 'clients') loadClients().catch(fail);
+  if (view === 'payments') loadPayments().catch(fail);
 }
 $$('.navbtn').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
 
@@ -440,7 +433,7 @@ function renderStatus() {
     row('Modo', s.mode === 'webhook' ? 'Webhook' : 'Polling (celular)') +
     row('BASE_URL', s.baseUrl ? esc(s.baseUrl) : '<span class="text-amber-400">não definida</span>') +
     row('Mercado Pago', s.mpToken === true ? '<span class="text-emerald-400">ok</span>' : s.mpToken === 'placeholder' ? '<span class="text-amber-400">placeholder [cole aqui]</span>' : '<span class="text-red-400">ausente</span>') +
-    row('Senha do painel', s.adminPassword ? '<span class="text-emerald-400">definida</span>' : '<span class="text-amber-400">padrão (admin)</span>') +
+    row('Senha do painel', s.adminPassword ? '<span class="text-emerald-400">definida</span>' : s.passwordGenerated ? '<span class="text-emerald-400">gerada (veja o log)</span>' : '<span class="text-amber-400">padrão (admin)</span>') +
     row('Dados', esc(s.dataDir)) +
     row('Node', esc(s.node)) +
     row('Ligado há', Math.floor(s.uptime / 60) + ' min') +
@@ -649,6 +642,8 @@ function validateFlow() {
   if (!keys.length) errs.push('O fluxo não tem nenhum nó.');
   if (!d.start || !d.nodes[d.start]) errs.push('Defina um nó inicial válido.');
   for (const k of keys) {
+    if (k.length > 61) errs.push(`Nó "${k}": o ID é longo demais (máx. 61 caracteres; o botão do Telegram tem limite de 64 bytes).`);
+    else if (!/^[A-Za-z0-9_-]+$/.test(k)) errs.push(`Nó "${k}": use apenas letras, números, "_" e "-" no ID.`);
     const n = d.nodes[k];
     (n.buttons || []).forEach((b) => {
       if (!b.to) errs.push(`Nó "${k}": botão "${b.label || 'sem rótulo'}" está sem destino (some no Telegram).`);
@@ -883,6 +878,8 @@ $('#nodeSave').addEventListener('click', () => {
   const oldKey = editingKey;
   const newKey = ($('#nKey').value || '').trim().replace(/\s+/g, '_');
   if (!newKey) return toast('Dê um ID ao nó', false);
+  if (!/^[A-Za-z0-9_-]+$/.test(newKey)) return toast('ID inválido: use só letras, números, "_" e "-".', false);
+  if (newKey.length > 61) return toast('ID muito longo (máx. 61 caracteres).', false);
   if (newKey !== oldKey && currentFlow.data.nodes[newKey]) return toast('Já existe um nó com esse ID', false);
 
   const n = currentFlow.data.nodes[oldKey];

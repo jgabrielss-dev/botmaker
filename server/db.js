@@ -10,7 +10,6 @@ function resolveDataDir() {
     path.join(os.tmpdir(), 'botmaker-data')
   ].filter(Boolean);
 
-  const persistent = !!process.env.DATA_DIR;
   for (const dir of candidates) {
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -19,7 +18,7 @@ function resolveDataDir() {
       fs.unlinkSync(probe);
       if (process.env.DATA_DIR && dir !== process.env.DATA_DIR) {
         console.warn(`AVISO: DATA_DIR="${process.env.DATA_DIR}" nao esta gravavel. Usando ${dir}`);
-        if (persistent) console.warn('AVISO: sem disco/volume persistente, os dados serao APAGADOS a cada reinicio.');
+        console.warn('AVISO: sem disco/volume persistente, os dados serao APAGADOS a cada reinicio.');
       }
       return dir;
     } catch (e) {
@@ -49,7 +48,7 @@ CREATE TABLE IF NOT EXISTS bots (
 
 CREATE TABLE IF NOT EXISTS flows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  bot_id INTEGER NOT NULL,
+  bot_id INTEGER NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   name TEXT NOT NULL DEFAULT 'Fluxo',
   data TEXT NOT NULL DEFAULT '{"start":"","order":[],"nodes":{}}',
   created_at INTEGER NOT NULL DEFAULT 0
@@ -57,23 +56,24 @@ CREATE TABLE IF NOT EXISTS flows (
 
 CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  bot_id INTEGER NOT NULL,
+  bot_id INTEGER NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   chat_id TEXT NOT NULL,
-  flow_id INTEGER,
+  flow_id INTEGER REFERENCES flows(id) ON DELETE SET NULL,
   node_key TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active',
   payment_id INTEGER,
   last_activity INTEGER NOT NULL DEFAULT 0,
   last_reminder INTEGER NOT NULL DEFAULT 0,
+  last_pix_at INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL DEFAULT 0,
   UNIQUE(bot_id, chat_id)
 );
 
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  bot_id INTEGER NOT NULL,
+  bot_id INTEGER NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   chat_id TEXT NOT NULL,
-  flow_id INTEGER,
+  flow_id INTEGER REFERENCES flows(id) ON DELETE SET NULL,
   node_key TEXT DEFAULT '',
   mp_id TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS groups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  bot_id INTEGER NOT NULL,
+  bot_id INTEGER NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   chat_id TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL DEFAULT 0,
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS groups (
 /* Chats que o bot ja viu (para descobrir grupos/IDs sem digitar na mao). */
 CREATE TABLE IF NOT EXISTS bot_chats (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  bot_id INTEGER NOT NULL,
+  bot_id INTEGER NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   chat_id TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL DEFAULT '',
@@ -110,6 +110,18 @@ CREATE TABLE IF NOT EXISTS bot_chats (
   updated_at INTEGER NOT NULL DEFAULT 0,
   UNIQUE(bot_id, chat_id)
 );
+
+/* ---------- Indices (consultas do painel e dos jobs) ---------- */
+CREATE INDEX IF NOT EXISTS idx_clients_bot     ON clients(bot_id);
+CREATE INDEX IF NOT EXISTS idx_clients_status  ON clients(status);
+CREATE INDEX IF NOT EXISTS idx_clients_flow    ON clients(flow_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+CREATE INDEX IF NOT EXISTS idx_payments_mp     ON payments(mp_id);
+CREATE INDEX IF NOT EXISTS idx_payments_bot    ON payments(bot_id);
+CREATE INDEX IF NOT EXISTS idx_payments_chat   ON payments(bot_id, chat_id);
+CREATE INDEX IF NOT EXISTS idx_groups_bot      ON groups(bot_id);
+CREATE INDEX IF NOT EXISTS idx_botchats_bot    ON bot_chats(bot_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at);
 `);
 
 /* ---------- Migracoes leves (colunas novas em bancos ja existentes) ---------- */
@@ -127,6 +139,7 @@ addColumn('clients', 'first_name', "first_name TEXT NOT NULL DEFAULT ''");
 addColumn('clients', 'last_name', "last_name TEXT NOT NULL DEFAULT ''");
 addColumn('clients', 'username', "username TEXT NOT NULL DEFAULT ''");
 addColumn('clients', 'last_seen', 'last_seen INTEGER NOT NULL DEFAULT 0');
+addColumn('clients', 'last_pix_at', 'last_pix_at INTEGER NOT NULL DEFAULT 0');
 
 db.DATA_DIR = DATA_DIR;
 module.exports = db;

@@ -11,29 +11,55 @@ const poll = require('./poll');
 const router = express.Router();
 
 /* ---------- Auth ---------- */
+// limite simples de tentativas de login por IP (evita forca bruta)
+const LOGIN_WINDOW = 15 * 60 * 1000;
+const LOGIN_MAX = 10;
+const loginFails = new Map(); // ip -> { count, first }
+
+function loginBlocked(ip) {
+  const rec = loginFails.get(ip);
+  if (!rec) return false;
+  if (Date.now() - rec.first > LOGIN_WINDOW) {
+    loginFails.delete(ip);
+    return false;
+  }
+  return rec.count >= LOGIN_MAX;
+}
+function noteLoginFail(ip) {
+  const now = Date.now();
+  const rec = loginFails.get(ip) || { count: 0, first: now };
+  if (now - rec.first > LOGIN_WINDOW) {
+    rec.count = 0;
+    rec.first = now;
+  }
+  rec.count++;
+  loginFails.set(ip, rec);
+}
+
+function cookieAttrs(maxAge) {
+  const secure = /^https:\/\//.test(process.env.BASE_URL || '');
+  return `; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure ? '; Secure' : ''}`;
+}
+
 router.post('/login', (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'desconhecido';
+  if (loginBlocked(ip)) {
+    return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos e tente de novo.' });
+  }
   const token = auth.login((req.body && req.body.password) || '');
   if (!token) {
-    const issues = auth.passwordIssues();
-    const expectedLen = auth.expectedPassword().length;
-    const givenLen = String((req.body && req.body.password) || '').length;
-    return res.status(401).json({
-      error: 'Senha incorreta',
-      debug: {
-        digitada: givenLen + ' caracteres',
-        gravada: expectedLen + ' caracteres',
-        avisos: issues
-      }
-    });
+    noteLoginFail(ip);
+    return res.status(401).json({ error: 'Senha incorreta' });
   }
-  res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax`);
+  loginFails.delete(ip);
+  res.setHeader('Set-Cookie', `sid=${token}${cookieAttrs(60 * 60 * 24 * 7)}`);
   res.json({ ok: true });
 });
 
 router.post('/logout', (req, res) => {
   const cookies = auth.parseCookies(req);
   auth.logout(cookies.sid);
-  res.setHeader('Set-Cookie', 'sid=; HttpOnly; Path=/; Max-Age=0');
+  res.setHeader('Set-Cookie', `sid=${cookieAttrs(0)}`);
   res.json({ ok: true });
 });
 
@@ -80,7 +106,8 @@ router.get('/status', (req, res) => {
     mpToken: (process.env.MERCADO_PAGO_ACCESS_TOKEN || '').startsWith('[cole')
       ? 'placeholder'
       : !!process.env.MERCADO_PAGO_ACCESS_TOKEN,
-    adminPassword: !!process.env.ADMIN_PASSWORD,
+    adminPassword: !auth.usingGeneratedPassword(),
+    passwordGenerated: auth.usingGeneratedPassword(),
     passwordIssues: auth.passwordIssues(),
     warnings: envWarnings(),
     bots: bots.map((b) => ({ id: b.id, name: b.name, webhook: !!b.webhook_url })),
@@ -246,6 +273,9 @@ router.put('/flows/:id', (req, res) => {
 router.delete('/flows/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM flows WHERE id = ?').get(Number(req.params.id));
   if (!row) return res.status(404).json({ error: 'Fluxo não encontrado' });
+  // solta quem apontava para este fluxo (evita referencias orfas)
+  db.prepare('UPDATE clients SET flow_id = NULL WHERE flow_id = ?').run(row.id);
+  db.prepare('UPDATE payments SET flow_id = NULL WHERE flow_id = ?').run(row.id);
   db.prepare('DELETE FROM flows WHERE id = ?').run(row.id);
   db.prepare('UPDATE bots SET flow_id = NULL WHERE flow_id = ?').run(row.id);
   res.json({ ok: true });
@@ -276,11 +306,13 @@ router.post('/clients/:id/action', async (req, res) => {
   const action = String((req.body && req.body.action) || '');
   try {
     if (action === 'restart') {
-      await E.restartClient(client.bot_id, client.chat_id);
+      const ok = await E.restartClient(client.bot_id, client.chat_id);
+      if (!ok) return res.status(400).json({ error: 'Este bot não tem fluxo configurado.' });
       return res.json({ ok: true });
     }
     if (action === 'unlock') {
-      await E.unlockClient(client.bot_id, client.chat_id);
+      const ok = await E.unlockClient(client.bot_id, client.chat_id);
+      if (!ok) return res.status(400).json({ error: 'Bot ou fluxo não encontrado.' });
       return res.json({ ok: true });
     }
     if (action === 'delete') {
