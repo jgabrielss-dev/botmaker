@@ -134,6 +134,9 @@ bash scripts/termux/start.sh   # subir de novo
 **Observações**
 
 - Os dados (SQLite + uploads) ficam em `~/botmaker/data`.
+- **Instalação travada em `Get: ...` (espelho lento):** o `install.sh` não roda
+  `pkg upgrade` (era o que demorava); ele só atualiza índices e instala Node+git.
+  Se ainda travar, troque o espelho com `termux-change-repo` e rode de novo.
 - **Android 16:** se o painel não abrir com o Termux em segundo plano, traga o Termux
   para a frente por um instante. Como alternativa, acesse de outro aparelho na mesma
   Wi-Fi: o `start.sh`/log mostra o endereço `http://<ip-do-celular>:3000`.

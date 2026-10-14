@@ -7,9 +7,10 @@ if [ -z "${TERMUX_VERSION:-}" ] && [ ! -d /data/data/com.termux ]; then
   echo "Aviso: isto parece nao ser o Termux (Android). O 'pkg' abaixo pode falhar."
 fi
 
-echo "== Atualizando pacotes do Termux =="
+echo "== Atualizando a lista de pacotes do Termux (rapido) =="
+# Atualiza apenas os indices. O 'pkg upgrade -y' completo e OPCIONAL e costuma
+# travar em espelhos lentos; rode manualmente se quiser:  pkg upgrade -y
 pkg update -y || true
-pkg upgrade -y || true
 
 echo "== Instalando Node.js e git =="
 pkg install -y nodejs git
