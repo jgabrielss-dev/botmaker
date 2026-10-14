@@ -25,15 +25,22 @@ node -e "require('node:sqlite'); console.log('node:sqlite OK')"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-echo "== Instalando dependencias do projeto =="
-npm install --omit=dev
-
 if [ ! -f .env ]; then
+  if [ ! -f .env.example ]; then
+    echo "ERRO: nao encontrei .env.example na pasta do projeto."
+    echo "Pasta atual: $ROOT"
+    echo "Rode este script de dentro de ~/botmaker."
+    exit 1
+  fi
+
   cp .env.example .env
   echo ""
   echo "Criei um .env a partir do exemplo. Edite com: nano .env"
   echo "Preencha ADMIN_PASSWORD e as chaves do Mercado Pago. Deixe BASE_URL VAZIO."
 fi
+
+echo "== Instalando dependencias do projeto =="
+npm install --omit=dev
 
 echo ""
 echo "Pronto! Inicie o painel com:"

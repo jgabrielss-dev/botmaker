@@ -76,18 +76,31 @@ bash scripts/update.sh
 ### Celular Android (Termux) — grátis, roda no próprio aparelho
 
 ```bash
-# Instalar (primeira vez) — no Termux
+# 1) Instalar Git e baixar o projeto
 pkg install -y git
 git clone https://github.com/jgabrielss-dev/botmaker
 cd botmaker
-bash scripts/termux/install.sh  # instala Node + dependências
+
+# 2) Instalar Node + dependências e criar o .env
+bash scripts/termux/install.sh
+
+# 3) Garantir que o .env existe (se estiver vazio/ausente, copia o exemplo)
+[ -s .env ] || cp .env.example .env
 nano .env                       # ADMIN_PASSWORD e chaves do Mercado Pago (BASE_URL vazio!)
-bash scripts/termux/start.sh    # sobe em segundo plano
+# Salve com Ctrl+O, Enter e saia com Ctrl+X
+
+# 4) Subir o painel em segundo plano
+bash scripts/termux/start.sh
 # abra http://localhost:3000 no navegador do celular
 
 # Atualizar depois de novas versões (baixa, instala e reinicia)
 bash scripts/termux/update.sh
 ```
+
+> O `.env` **não vem do GitHub** — por segurança, só o `.env.example` é versionado.
+> Se o `nano` mostrar `[New File]` ou o arquivo estiver vazio, rode o passo 3 acima
+> dentro da pasta `~/botmaker`. Confirme com `pwd` que você está em
+> `/data/data/com.termux/files/home/botmaker`.
 
 Comandos úteis no celular:
 
@@ -141,12 +154,15 @@ Como usa **polling**, não precisa de domínio, HTTPS nem IP público — basta 
 
 3. Preencha o `.env` (o instalador já criou um a partir do exemplo):
    ```bash
+   [ -s .env ] || cp .env.example .env
    nano .env
    ```
    - `ADMIN_PASSWORD` = sua senha do painel
    - `MERCADO_PAGO_ACCESS_TOKEN` e `MERCADO_PAGO_PUBLIC_KEY` = suas chaves do Mercado Pago
    - **`BASE_URL=` (deixe vazio!)** → modo celular (polling + Pix pelo job de 60s)
    - Salve com `Ctrl+O`, `Enter` e saia com `Ctrl+X`.
+   - Se o `nano` mostrar `[New File]` ou o arquivo estiver vazio, o comando acima
+     copia o exemplo; execute-o dentro de `~/botmaker`.
 
 4. Suba o painel (em segundo plano, com wake-lock):
    ```bash
